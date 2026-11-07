@@ -1,0 +1,40 @@
+{
+  "name": "molding-pm-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "packageManager": "npm@12.0.2",
+  "engines": { "node": ">=24.18.0 <25", "npm": ">=12.0.2" },
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "build:pkgs": "npm run build -w @mpd/contracts",
+    "dev:api": "npm run build:pkgs && npm run dev -w @mpd/api",
+    "dev:web": "npm run build:pkgs && npm run dev -w @mpd/web",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "npm run build:pkgs && tsc -p packages/contracts && tsc -p packages/test-utils && tsc -p apps/api && tsc -p apps/web && tsc -p .",
+    "test": "npm run build:pkgs && vitest run",
+    "build": "npm run build:pkgs && npm run build -w @mpd/api && npm run build -w @mpd/web",
+    "guard:production": "node scripts/guard-production.mjs",
+    "test:visual": "playwright test",
+    "db:migrate": "node apps/api/dist/cli/migrate.js",
+    "db:create-admin": "node apps/api/dist/cli/create-admin.js",
+    "start": "node apps/api/dist/server.js",
+    "verify": "npm run build:pkgs && npm run lint && npm run typecheck && npm run test && npm run build && npm run guard:production"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.65.0",
+    "@types/node": "^24.0.0",
+    "eslint": "10.14.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "^16.0.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1",
+    "vite": "8.3.6",
+    "vitest": "5.1.0"
+  },
+  "overrides": {
+    "vite": "8.3.6",
+    "typescript": "5.9.3"
+  }
+}

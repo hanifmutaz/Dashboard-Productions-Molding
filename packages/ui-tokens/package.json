@@ -1,0 +1,1 @@
+{ "name": "@mpd/ui-tokens", "version": "1.0.0", "private": true, "exports": { "./tokens.css": "./tokens.css" } }

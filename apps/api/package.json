@@ -1,0 +1,24 @@
+{
+  "name": "@mpd/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env --watch dist/server.js"
+  },
+  "dependencies": {
+    "@mpd/contracts": "1.0.0",
+    "@node-rs/argon2": "2.2.2",
+    "express": "5.3.0",
+    "pg": "8.23.1",
+    "pino": "10.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/pg": "^8.11.0",
+    "@types/supertest": "^6.0.0",
+    "supertest": "7.3.2"
+  }
+}
