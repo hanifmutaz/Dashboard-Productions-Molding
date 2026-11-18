@@ -54,11 +54,11 @@ const Schema = z
     CONMAS_COL_REV_NO: optIdent,
     CONMAS_COL_DELETED: optIdent,
     CONMAS_COL_UPDATED_AT: optIdent,
-    // OEE / Availability / Performance published by ConMas (owner 2026-11-17). Candidates follow docs/03-database/conmas-mapping.md (1_39..1_41);
+    // OEE / Availability / Performance published by ConMas (owner 2026-11-17). Candidates follow docs/03-database/conmas-mapping.md (1_36..1_38 di view 2026-11-18);
     // verify the exact names/suffix against the ConMas Excel. Columns missing from the view are skipped, not fatal.
-    CONMAS_COL_OEE: identOrOff('cluster_1_39_n'),
-    CONMAS_COL_AVAILABILITY: identOrOff('cluster_1_40_n'),
-    CONMAS_COL_PERFORMANCE: identOrOff('cluster_1_41_n'),
+    CONMAS_COL_OEE: identOrOff('cluster_1_36_n'),
+    CONMAS_COL_AVAILABILITY: identOrOff('cluster_1_37_n'),
+    CONMAS_COL_PERFORMANCE: identOrOff('cluster_1_38_n'),
     CONMAS_RATE_SCALE: z.enum(['percent', 'fraction']).default('percent'),
   })
   .superRefine((c, ctx) => {

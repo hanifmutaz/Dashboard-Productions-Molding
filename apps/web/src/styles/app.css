@@ -337,7 +337,7 @@ tr.ex td{background:var(--surface-2)!important;height:auto;padding:0;white-space
 .fmt span{font-family:var(--mono);font-size:var(--s-size-12);background:var(--surface);border:var(--s-size-1) solid var(--line-2);border-radius:var(--r-sm);padding:var(--s-size-2) var(--s-size-7);color:var(--ink-2)}
 .fmt span b{color:var(--faint);font-weight:var(--c-font-weight-500);margin-right:var(--s-size-4)}
 .pvw{max-height:var(--s-size-240);overflow:auto;border:var(--s-size-1) solid var(--line);border-radius:var(--r-sm);margin-top:var(--s-size-8)}
-.pvw th{position:static}
+.pvw th{position:sticky;top:0;z-index:1}
 .pvw td{height:var(--s-size-28)}
 .pvw tr.bad td{color:var(--bad)}
 .pvw tr.wn td{color:var(--warn)}

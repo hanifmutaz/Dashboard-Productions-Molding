@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import { LossGroupSchema } from './monitoring.js';
 
-export const PartSchema = z.object({ dpNo: z.string().min(1).max(40), name: z.string().max(120), pricePerPcs: z.number().int().nonnegative().nullable(), materialCode: z.string().max(40).nullable(), version: z.number().int() });
+/** Harga/PCS dalam Rupiah: >= 0, maksimal 4 desimal (kolom numeric(14,4)). */
+const PriceSchema = z.number().nonnegative().max(9_999_999_999).refine((v) => Math.abs(Math.round(v * 1e4) - v * 1e4) < 1e-6, 'maksimal 4 desimal');
+
+export const PartSchema = z.object({ dpNo: z.string().min(1).max(40), name: z.string().max(120), pricePerPcs: PriceSchema.nullable(), materialCode: z.string().max(40).nullable(), version: z.number().int() });
 export type Part = z.infer<typeof PartSchema>;
 export const MaterialSchema = z.object({ code: z.string().min(1).max(40), name: z.string().min(1).max(120), pricePerGram: z.number().nonnegative().nullable(), version: z.number().int() });
 export type Material = z.infer<typeof MaterialSchema>;
@@ -12,7 +15,7 @@ export const StopCategorySchema = z.object({
 export type StopCategory = z.infer<typeof StopCategorySchema>;
 export interface MachineMaster { machineNo: string; dpNo: string | null; productName: string | null; cavity: string | null; lastSeen: string | null }
 
-export const PartPriceUpdateSchema = z.object({ items: z.array(z.object({ dpNo: z.string().min(1).max(40), pricePerPcs: z.number().int().nonnegative(), version: z.number().int().nullable(), name: z.string().max(120).optional() })).min(1).max(2000) });
+export const PartPriceUpdateSchema = z.object({ items: z.array(z.object({ dpNo: z.string().min(1).max(40), pricePerPcs: PriceSchema, version: z.number().int().nullable(), name: z.string().max(120).optional() })).min(1).max(2000) });
 export const MaterialUpdateSchema = z.object({
   materials: z.array(z.object({ code: z.string().min(1).max(40), name: z.string().min(1).max(120), pricePerGram: z.number().positive(), version: z.number().int().nullable() })).max(500),
   partMaterials: z.array(z.object({ dpNo: z.string().min(1).max(40), materialCode: z.string().min(1).max(40), version: z.number().int().nullable() })).max(2000),

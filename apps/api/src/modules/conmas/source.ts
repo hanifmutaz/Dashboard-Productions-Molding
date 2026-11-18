@@ -121,14 +121,14 @@ export function normalizeRow(row: Record<string, unknown>, cfg: ConmasConfig): S
   HOUR_BLOCKS.forEach((b, block) => {
     const startHour = parseHourLabel(text.parse(row[b.label]));
     for (const s of b.slots) {
-      const minutes = num.safeParse(row[s.minutes]);
+      const minutes = s.minutes ? num.safeParse(row[s.minutes]) : null;
       const qty = num.safeParse(row[s.qty]);
       const rq = s.rejectQty ? num.safeParse(row[s.rejectQty]) : null;
       const slot: SourceSlot = {
         block, startHour,
         qty: qty.success ? qty.data : null,
-        minutes: minutes.success ? minutes.data : null,
-        category: text.parse(row[s.category]),
+        minutes: minutes?.success ? minutes.data : null,
+        category: s.category ? text.parse(row[s.category]) : null,
         detail: s.detail ? text.parse(row[s.detail]) : null,
         reject: s.reject ? text.parse(row[s.reject]) : null,
         rejectQty: rq?.success ? rq.data : null,

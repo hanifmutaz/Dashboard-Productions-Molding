@@ -16,8 +16,9 @@
     "build": "npm run build:pkgs && npm run build -w @mpd/api && npm run build -w @mpd/web",
     "guard:production": "node scripts/guard-production.mjs",
     "test:visual": "playwright test",
-    "db:migrate": "node apps/api/dist/cli/migrate.js",
-    "db:create-admin": "node apps/api/dist/cli/create-admin.js",
+    "db:migrate": "node --env-file-if-exists=apps/api/.env apps/api/dist/cli/migrate.js",
+    "db:create-admin": "node --env-file-if-exists=apps/api/.env apps/api/dist/cli/create-admin.js",
+    "db:reset-password": "node --env-file-if-exists=apps/api/.env apps/api/dist/cli/reset-password.js",
     "start": "node apps/api/dist/server.js",
     "verify": "npm run build:pkgs && npm run lint && npm run typecheck && npm run test && npm run build && npm run guard:production"
   },

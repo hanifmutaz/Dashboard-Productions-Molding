@@ -27,3 +27,14 @@ describe('contracts', () => {
     expect(isSubset(DEFAULT_ROLE_PERMISSIONS.admin, DEFAULT_ROLE_PERMISSIONS.superAdmin)).toBe(true);
   });
 });
+
+import { PartPriceUpdateSchema } from '../src/masterData.js';
+describe('Harga/PCS boleh desimal (maks 4 digit)', () => {
+  const body = (pricePerPcs: number) => ({ items: [{ dpNo: 'X', pricePerPcs, version: null }] });
+  it('menerima 364.39, menolak negatif dan >4 desimal', () => {
+    expect(PartPriceUpdateSchema.safeParse(body(364.39)).success).toBe(true);
+    expect(PartPriceUpdateSchema.safeParse(body(1250)).success).toBe(true);
+    expect(PartPriceUpdateSchema.safeParse(body(-1)).success).toBe(false);
+    expect(PartPriceUpdateSchema.safeParse(body(1.23456)).success).toBe(false);
+  });
+});

@@ -31,8 +31,8 @@ describe('ConMas normalisation', () => {
     [HEADER_COLUMNS.productionDate]: '2026-11-03 00:00:00', [HEADER_COLUMNS.machineNo]: '31', [HEADER_COLUMNS.shift]: 'S2', [HEADER_COLUMNS.group]: 'A',
     [HEADER_COLUMNS.outputPlan]: '2880.0000000000', [HEADER_COLUMNS.outputActual]: '750.0000000000', [HEADER_COLUMNS.outputGross]: '1275.0000000000', [HEADER_COLUMNS.ngQty]: '',
     [HEADER_COLUMNS.productName]: 'HIF4-16D-3.18R PROTECTOR                ', [HEADER_COLUMNS.plannedMinutes]: '480.0000000000',
-    [b0.label]: '15.00-16.00', [b0.slots[0]!.minutes]: '60.0000000000', [b0.slots[0]!.category]: 'Dandori loss(Set up & Adjust ment loss)', [b0.slots[0]!.detail!]: 'Heater up',
-    [b0.slots[1]!.category]: 'Informasi', [b0.slots[1]!.detail!]: 'Alarm range aktif',
+    [b0.label]: '15.00-16.00', [b0.slots[0]!.minutes!]: '60.0000000000', [b0.slots[0]!.category!]: 'Dandori loss(Set up & Adjust ment loss)', [b0.slots[0]!.detail!]: 'Heater up',
+    [b0.slots[1]!.category!]: 'Informasi', [b0.slots[1]!.detail!]: 'Alarm range aktif',
     rid: '457678', rev: '2', del: '0', upd: '2026-11-04 08:25:52.829606',
   };
   it('parses sample row (PROPOSED mapping), keeps null for empty numerics, trims text', () => {

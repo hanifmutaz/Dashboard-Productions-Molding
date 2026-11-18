@@ -1,6 +1,8 @@
 /* Display formatting only (ADR-003: no business formulas in the UI). */
 export const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 export const fmt = (n: number | null | undefined) => (isNum(n) ? Math.round(n).toLocaleString('en-US') : '—');
+/** Harga per pcs: sampai 4 desimal, tanpa pembulatan ke bilangan bulat. */
+export const fmtPrice = (n: number | null | undefined) => (isNum(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 4 }) : '—');
 export const f1 = (n: number | null | undefined) => (isNum(n) ? (Math.round(n * 10) / 10).toFixed(1) : '—');
 export const kf = (n: number) => (Math.abs(n) >= 1e9 ? (n / 1e9).toFixed(2) + ' bn' : Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(1) + ' mn' : fmt(n));
 export const rp = (n: number | null | undefined) => (isNum(n) ? 'Rp ' + fmt(n) : '—');

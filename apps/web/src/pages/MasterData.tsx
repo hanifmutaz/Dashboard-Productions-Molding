@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PERMISSIONS, type MasterDataView, type Material, type Part } from '@mpd/contracts';
 import { ApiFailure, api } from '../lib/api';
 import { useSession } from '../lib/session';
-import { fmt, tokenColor } from '../lib/format';
+import { fmt, fmtPrice, tokenColor } from '../lib/format';
 import { Kpi } from '../components/kpi';
 import { DataTable, downloadCsv } from '../components/table';
 import { Tabs, useToast } from '../components/ui';
@@ -87,15 +87,14 @@ function Uploader<T>({ id, title, sub, expected, cols, parse, onApply, template,
               <div className="note"><b>{rows.length} rows checked</b> · {rows.filter((r) => r.status === 'new').length} new · {rows.filter((r) => r.status === 'changed').length} changed · {rows.filter((r) => r.status === 'unchanged').length} unchanged · {rows.filter((r) => !r.err && r.warn).length} warnings · {errors} errors</div>
               {errors ? <div className="banner e" style={{ marginTop: 'var(--s-size-8)' }}><b>Upload blocked.</b> Fix all errors in the CSV and upload it again; no rows will be applied.</div>
                 : <div className="banner w" style={{ marginTop: 'var(--s-size-8)' }}><b>Review before applying.</b> Warnings don’t block upload. Changes are saved to the server and audited.</div>}
-              <div className="caps" style={{ marginTop: 'var(--s-size-10)' }}>Preview · {fileName}</div>
+              <div className="caps" style={{ marginTop: 'var(--s-size-10)' }}>Preview · {fileName} · all {rows.length} rows, errors first · scroll to see more</div>
               <div className="pvw"><table>
                 <thead><tr><th>CSV row</th>{cols.map((c) => <th key={c[0]}>{c[0]}</th>)}<th>Status</th></tr></thead>
                 <tbody>
-                  {rows.slice(0, 20).map((r) => (
+                  {[...rows.filter((r) => r.err), ...rows.filter((r) => !r.err)].map((r) => (
                     <tr key={r.line} className={r.err ? 'bad' : r.warn ? 'wn' : ''}><td>{r.line}</td>{cols.map((c, i) => <td key={c[0]}>{r.value ? c[1](r.value) : (r.raw[i + 1] ?? '')}</td>)}
                       <td>{r.err ? `ERROR · ${r.err}` : `${(r.status ?? '').toUpperCase()}${r.warn ? ` · Warning: ${r.warn}` : ''}`}</td></tr>
                   ))}
-                  {rows.length > 20 && <tr><td colSpan={cols.length + 2} className="fa">Preview shows first 20 of {rows.length} rows; summary covers every row.</td></tr>}
                 </tbody>
               </table></div>
             </>
@@ -155,18 +154,18 @@ export function MasterDataPage() {
           right={<span className="fa" style={{ fontSize: 'var(--s-size-12)' }}>All prices in Rupiah · {editable ? 'changes are audited' : 'read-only for your role'}</span>} />
         {tab === 'master-0' && (
           <div className="pane on"><div className="master-stack">
-            <Uploader<{ p: Part | null; dpNo: string; price: number; name: string }> id="ims-file" title="Upload CSV · Master data part" sub="One row per DP Part · price per pcs in Rupiah, whole number" disabled={!editable}
-              expected={['No', 'DP Part', 'DP Name', 'Harga/PCS']} cols={[['DP Part', (x) => x.dpNo], ['DP Name', (x) => x.name], ['Harga/PCS', (x) => 'Rp ' + fmt(x.price)]]}
+            <Uploader<{ p: Part | null; dpNo: string; price: number; name: string }> id="ims-file" title="Upload CSV · Master data part" sub="One row per DP Part · price per pcs in Rupiah, up to 4 decimals" disabled={!editable}
+              expected={['No', 'DP Part', 'DP Name', 'Harga/PCS']} cols={[['DP Part', (x) => x.dpNo], ['DP Name', (x) => x.name], ['Harga/PCS', (x) => 'Rp ' + fmtPrice(x.price)]]}
               parse={(r, acc) => {
                 const dp = r[1]!.trim(), price = parseNum(r[3]!, 'int'), name = r[2]!.trim();
                 if (!dp) return { line: 0, raw: r, err: 'DP Part is empty' };
-                if (!(price >= 0) || !Number.isInteger(price)) return { line: 0, raw: r, err: 'invalid Harga/PCS' };
+                if (!(price >= 0) || Math.abs(Math.round(price * 1e4) - price * 1e4) > 1e-6) return { line: 0, raw: r, err: 'invalid Harga/PCS' };
                 const dup = acc.find((a) => a.value?.dpNo.toLowerCase() === dp.toLowerCase());
                 if (dup) return { line: 0, raw: r, err: `Duplicate DP Part · also in row ${dup.line}` };
                 const p = partBy.get(dp.toLowerCase()) ?? null;
                 const old = p?.pricePerPcs ?? null;
                 return { line: 0, raw: r, value: { p, dpNo: p?.dpNo ?? dp, price, name }, status: !p ? 'new' : old === price ? 'unchanged' : 'changed',
-                  warn: old && Math.abs(price - old) / old > 0.5 ? `changes ${Math.round(((price - old) / old) * 100)}% vs current Rp ${fmt(old)} – check the separator` : p && name && name.toLowerCase() !== p.name.toLowerCase() ? `DP Name differs from master (${p.name})` : undefined };
+                  warn: old && Math.abs(price - old) / old > 0.5 ? `changes ${Math.round(((price - old) / old) * 100)}% vs current Rp ${fmtPrice(old)} – check the separator` : p && name && name.toLowerCase() !== p.name.toLowerCase() ? `DP Name differs from master (${p.name})` : undefined };
               }}
               onApply={(rows) => saveParts.mutateAsync(rows.map((x) => ({ dpNo: x.dpNo, pricePerPcs: x.price, version: x.p?.version ?? null, name: x.name }))).then(() => undefined)}
               template={() => downloadCsv('master_data_part.csv', [['No', 'DP Part', 'DP Name', 'Harga/PCS'], ...parts.map((p, i) => [i + 1, p.dpNo, p.name, p.pricePerPcs])])} />
@@ -181,7 +180,7 @@ export function MasterDataPage() {
                       const val = draft[p.dpNo] ?? (p.pricePerPcs === null ? '' : String(p.pricePerPcs));
                       return (
                         <tr key={p.dpNo}><td className="mc">{p.dpNo}</td><td>{p.name}</td><td>{machinesOf(p.dpNo).map((m) => <span key={m} className="tagm">MC {m}</span>)}</td>
-                          <td className="n"><span className="pr"><span>Rp</span><input className={`pin${draft[p.dpNo] !== undefined && draft[p.dpNo] !== String(p.pricePerPcs ?? '') ? ' chg' : ''}`} type="number" min={0} step={1} value={val} disabled={!editable} aria-label={`Harga/PCS ${p.dpNo}`} onChange={(e) => setDraft((d) => ({ ...d, [p.dpNo]: e.target.value }))} /></span></td></tr>
+                          <td className="n"><span className="pr"><span>Rp</span><input className={`pin${draft[p.dpNo] !== undefined && draft[p.dpNo] !== String(p.pricePerPcs ?? '') ? ' chg' : ''}`} type="number" min={0} step="any" value={val} disabled={!editable} aria-label={`Harga/PCS ${p.dpNo}`} onChange={(e) => setDraft((d) => ({ ...d, [p.dpNo]: e.target.value }))} /></span></td></tr>
                       );
                     })}
                     {!parts.length && <tr><td colSpan={4} className="empty">{q.isPending ? 'Memuat…' : 'Belum ada part. Upload CSV master data part.'}</td></tr>}

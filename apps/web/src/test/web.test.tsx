@@ -43,6 +43,8 @@ describe('CSV preview parser', () => {
   it('handles quotes, semicolons and separators', () => {
     expect(csvRows('No;DP Part\n1;"A;B"\n')).toEqual([['No', 'DP Part'], ['1', 'A;B']]);
     expect(parseNum('Rp 1.250', 'int')).toBe(1250);
+    expect(parseNum('364.39', 'int')).toBe(364.39);
+    expect(parseNum('621.4', 'int')).toBe(621.4);
     expect(parseNum('38,5', 'dec')).toBe(38.5);
     expect(Number.isNaN(parseNum('', 'int'))).toBe(true);
   });
