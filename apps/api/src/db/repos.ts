@@ -173,11 +173,12 @@ export function createPgRepos(pool: pg.Pool): Repos {
       async create(s) {
         await q.query('INSERT INTO app_session (id_hash, user_id, csrf_token, absolute_expires_at) VALUES ($1,$2,$3,$4)', [s.idHash, s.userId, s.csrfToken, s.absoluteExpiresAt]);
       },
+      // csrf_token bertipe char(64): Postgres mengisi spasi di kanan, sedangkan header HTTP tidak membawanya -> trimEnd.
       async get(idHash) {
         const r = await q.query('SELECT * FROM app_session WHERE id_hash=$1', [idHash]);
         const s = r.rows[0] as Row | undefined;
         return s
-          ? { idHash: String(s.id_hash), userId: String(s.user_id), csrfToken: String(s.csrf_token), lastSeenAt: s.last_seen_at as Date, absoluteExpiresAt: s.absolute_expires_at as Date, revokedAt: (s.revoked_at as Date | null) ?? null }
+          ? { idHash: String(s.id_hash), userId: String(s.user_id), csrfToken: String(s.csrf_token).trimEnd(), lastSeenAt: s.last_seen_at as Date, absoluteExpiresAt: s.absolute_expires_at as Date, revokedAt: (s.revoked_at as Date | null) ?? null }
           : null;
       },
       async touch(idHash) {

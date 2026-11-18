@@ -9,7 +9,21 @@ export class ApiFailure extends Error {
   }
 }
 
-async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
+/** Token CSRF basi (sesi diganti di tab lain, login ulang, restart): ambil token terbaru dari /api/auth/me. */
+async function refreshCsrf(): Promise<boolean> {
+  try {
+    const res = await fetch(new URL('/api/auth/me', globalThis.location.href).href, { headers: { Accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store' });
+    if (!res.ok) return false;
+    const me = (await res.json()) as { kind?: string; csrfToken?: string };
+    if (me.kind !== 'user' || !me.csrfToken) return false;
+    csrfToken = me.csrfToken;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function call<T>(method: string, url: string, body?: unknown, retried = false): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (method !== 'GET' && csrfToken) headers['X-CSRF-Token'] = csrfToken;
@@ -29,6 +43,7 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
   }
   if (!res.ok) {
     const e = (json as ApiError | null)?.error;
+    if (res.status === 403 && e?.code === 'CSRF' && !retried && method !== 'GET' && (await refreshCsrf())) return call<T>(method, url, body, true);
     throw new ApiFailure(res.status, e?.code ?? 'HTTP_' + res.status, e?.message ?? 'Permintaan gagal.', e?.requestId);
   }
   return json as T;

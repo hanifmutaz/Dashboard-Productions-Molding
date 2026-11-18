@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PERMISSIONS, type MasterDataView, type Material, type Part } from '@mpd/contracts';
 import { ApiFailure, api } from '../lib/api';
 import { useSession } from '../lib/session';
-import { fmt, fmtPrice, tokenColor } from '../lib/format';
+import { fmtPrice, tokenColor } from '../lib/format';
 import { Kpi } from '../components/kpi';
 import { DataTable, downloadCsv } from '../components/table';
 import { Tabs, useToast } from '../components/ui';

@@ -13,6 +13,7 @@ Daftar field: **FINAL** (Excel owner). Arti domain tiap baris: **PROPOSED** samp
 | Output actual (good) | cluster_1_14_n | | PROPOSED |
 | Output gross | cluster_1_46_n (OUTPUT GROSS PCS 1) | view 2026-11-18: sebelumnya 1_50_n | PROPOSED |
 | Qty reject | cluster_1_44_n (NG QTY 1) | kosong → null, bukan 0; view 2026-11-18: sebelumnya 1_48_n | PROPOSED |
+| NG (gram) | cluster_1_45_n (NG (GRAM) 1) | satuan gram (owner 2026-11-18); kosong → null, bukan 0; dasar Scrap kg/value | PROPOSED |
 | DP no / Produk / PO | cluster_1_9_t / 1_18_t / 1_19_t | | PROPOSED |
 | CT actual | cluster_1_32_n | CT plan tidak ada di sumber | PROPOSED |
 | Waktu terencana | cluster_1_975_n PROD OPT TIME | view 2026-11-18: sebelumnya 1_982_n; dipakai Kikai/Sogo/Shugyo | PROPOSED |
@@ -36,3 +37,11 @@ Timezone sumber: Asia/Bangkok (+07:00).
 - Blok 11 slot 3 (jam 16.00-17.00) di view hanya punya QTY PCS, DETAIL, REJECT, QTY REJECT: **MENIT dan KATEGORI tidak ada**. Slot itu tidak bisa dihitung sebagai loss sampai kolomnya ada.
 - Blok 2 slot 1 tidak punya DETAIL dan QTY REJECT (sama seperti sebelumnya).
 - Kolom sistem (record id, rev_no, deleted, update time) **tetap tidak ada** di daftar baru, jadi Q-019 masih BLOCKED.
+
+## Sales & Scrap (Q-009), 2026-11-18
+
+- **Sales (Rp)** = OUTPUT ACTUAL (good, `1_14_n`) × Harga/PCS (Master Data, `md_part.price_per_pcs`). **APPROVED** owner; NG tidak dikurangkan lagi karena actual sudah good.
+- **Scrap (kg)** = NG (GRAM) `1_45_n` ÷ 1000. Sumber ConMas, satuan gram (dikonfirmasi owner).
+- **Scrap value (Rp)** = NG (gram) × harga material per gram (Master Data: part → material → `price_per_gram`). **PROPOSED**, menunggu approver Quality/Finance.
+- **Scrap ratio (%)** = scrap value ÷ sales value × 100 (definisi Molding).
+- Rumus ada di `apps/api/src/modules/metrics/formulas.ts` (tanpa pembulatan; pembulatan Rupiah hanya di tampilan, Q-003). Route `/v1/monitoring/sales|scrap` belum memakainya.

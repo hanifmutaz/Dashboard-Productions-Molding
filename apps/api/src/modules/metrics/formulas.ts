@@ -2,7 +2,9 @@ import { metric, type Metric } from '@mpd/contracts';
 
 /* ADR-003: business formulas live only in the backend. Approved by owner 2026-11-07 (6 formulas, from the approved baseline (ADR-026)).
  * Owner 2026-11-17: OEE / Availability / Performance are NOT computed here; they are read from ConMas (see aggregateRate)
- * and hourly output = sum of the five QTY PCS slots per hour block. Sales and Scrap stay unavailable (Q-009). */
+ * and hourly output = sum of the five QTY PCS slots per hour block.
+ * Sales: APPROVED owner 2026-11-18 (Q-009 selesai untuk Sales). Scrap: sumber gram dari ConMas dikonfirmasi owner 2026-11-18, rumus
+ * scrap value & ratio masih menunggu approver Quality/Finance (PROPOSED) dan belum dipakai oleh route mana pun. */
 
 export const NOT_APPROVED = 'Rumus belum disetujui (Q-003)';
 
@@ -22,6 +24,33 @@ export const sogo = (planned: number, stop: number, calendar: number): Metric =>
 export const shugyo = (planned: number, calendar: number): Metric => (calendar > 0 && planned > 0 ? metric((planned / calendar) * 100) : metric(null, 'Waktu kalender/terencana = 0'));
 
 export const notApproved = (): Metric => metric(null, NOT_APPROVED);
+
+/* ---- Sales & Scrap (Q-009). Tanpa pembulatan di sini: pembulatan Rupiah hanya di lapisan tampilan (Q-003). ----
+ * Null tidak pernah dianggap 0: nilai yang belum ada mengembalikan metric(null, alasan). */
+
+/** Sales (Rp) = good qty × Harga/PCS (APPROVED 2026-11-18). Good qty = OUTPUT ACTUAL ConMas (sudah good, NG tidak dikurangkan lagi).
+ * Harga/PCS dari Master Data (md_part.price_per_pcs). */
+export const salesValue = (goodQty: number | null, pricePerPcs: number | null): Metric => {
+  if (goodQty === null) return metric(null, 'Output actual tidak tersedia');
+  if (goodQty < 0) return metric(null, 'Output actual tidak valid');
+  if (pricePerPcs === null) return metric(null, 'Harga/PCS belum diisi di Master Data');
+  return metric(goodQty * pricePerPcs);
+};
+/** Scrap (kg) = NG (gram) ConMas / 1000 (sumber & satuan gram dikonfirmasi owner 2026-11-18; rumus nilai PROPOSED). */
+export const scrapKg = (ngGram: number | null): Metric =>
+  ngGram === null ? metric(null, 'NG (gram) belum tersedia dari ConMas') : ngGram < 0 ? metric(null, 'NG (gram) tidak valid') : metric(ngGram / 1000);
+/** Scrap value (Rp) = NG (gram) × harga material per gram (Master Data: part -> material -> price_per_gram). PROPOSED. */
+export const scrapValue = (ngGram: number | null, pricePerGram: number | null): Metric => {
+  if (ngGram === null) return metric(null, 'NG (gram) belum tersedia dari ConMas');
+  if (ngGram < 0) return metric(null, 'NG (gram) tidak valid');
+  if (pricePerGram === null) return metric(null, 'Harga material per gram belum diisi di Master Data');
+  return metric(ngGram * pricePerGram);
+};
+/** Scrap ratio (%) = scrap value / sales value × 100 (definisi Molding; nilai scrap PROPOSED). */
+export const scrapRatio = (scrapValueRp: number | null, salesValueRp: number | null): Metric => {
+  if (scrapValueRp === null || salesValueRp === null) return metric(null, 'Scrap value atau Sales value tidak tersedia');
+  return salesValueRp > 0 ? metric((scrapValueRp / salesValueRp) * 100) : metric(null, 'Sales = 0');
+};
 
 /** Aggregates a ConMas-published rate (percent) over records. Weighted by planned minutes; plain mean when no weights exist.
  * Aggregation weighting is PROPOSED (DEV-018): the per-record values themselves come straight from ConMas. */

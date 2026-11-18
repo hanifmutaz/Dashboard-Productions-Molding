@@ -19,6 +19,8 @@ export interface SourceRecord {
   actual: number | null;
   gross: number | null;
   ngQty: number | null;
+  /** NG (GRAM) 1 dari ConMas, satuan gram (bukan kg). */
+  ngGram: number | null;
   dpNo: string | null;
   productName: string | null;
   poNo: string | null;
@@ -112,7 +114,7 @@ export function normalizeRow(row: Record<string, unknown>, cfg: ConmasConfig): S
   const machineNo = text.parse(row[H.machineNo]);
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !shift || !machineNo) return null;
   const n = (c: string) => num.safeParse(row[c]);
-  const nums = { plan: n(H.outputPlan), actual: n(H.outputActual), gross: n(H.outputGross), ng: n(H.ngQty), ct: n(H.ctActual), planned: n(H.plannedMinutes) };
+  const nums = { plan: n(H.outputPlan), actual: n(H.outputActual), gross: n(H.outputGross), ng: n(H.ngQty), ngGram: n(H.ngGram), ct: n(H.ctActual), planned: n(H.plannedMinutes) };
   if (Object.values(nums).some((r) => !r.success)) return null;
   const v = (r: (typeof nums)['plan']) => (r.success ? r.data : null);
   const rc = cfg.rates ?? NO_RATE_COLUMNS, rs = cfg.rateScale ?? 'percent';
@@ -140,7 +142,7 @@ export function normalizeRow(row: Record<string, unknown>, cfg: ConmasConfig): S
     recordId: cfg.cols.recordId ? str(row[cfg.cols.recordId]) : `${date}|${machineNo}|${shift}`,
     date, machineNo, shift,
     group: text.parse(row[H.group]), cavity: text.parse(row[H.cavity]),
-    plan: v(nums.plan), actual: v(nums.actual), gross: v(nums.gross), ngQty: v(nums.ng),
+    plan: v(nums.plan), actual: v(nums.actual), gross: v(nums.gross), ngQty: v(nums.ng), ngGram: v(nums.ngGram),
     dpNo: text.parse(row[H.dpNo]), productName: text.parse(row[H.productName]), poNo: text.parse(row[H.poNo]),
     ctActual: v(nums.ct), plannedMinutes: v(nums.planned),
     oee: rate(rc.oee), availability: rate(rc.availability), performance: rate(rc.performance),

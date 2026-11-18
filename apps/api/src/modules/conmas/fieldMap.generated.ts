@@ -21,6 +21,7 @@ export const HEADER_COLUMNS = {
   operatorNik: 'cluster_1_25_t',
   ctActual: 'cluster_1_32_n',
   ngQty: 'cluster_1_44_n',
+  ngGram: 'cluster_1_45_n',
   outputGross: 'cluster_1_46_n',
   plannedMinutes: 'cluster_1_975_n',
 } as const;

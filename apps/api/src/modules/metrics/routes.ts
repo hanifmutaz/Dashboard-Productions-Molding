@@ -11,7 +11,7 @@ import { SourceUnavailable, type ConmasSource, type SourceRecord } from '../conm
 import { readSettings } from '../settings/routes.js';
 import { categoryResolver } from './categories.js';
 import { applyFreshness, currentProductionDate } from './freshness.js';
-import { buildDailyRates, buildMachineDetail, buildMachineList, buildProduction, buildStopTime, buildUtilization, daysBetween, filterMachines, type Range } from './views.js';
+import { buildDailyRates, buildMachineDetail, buildMachineList, buildProduction, buildSales, buildStopTime, buildUtilization, partKey, daysBetween, filterMachines, type Range } from './views.js';
 
 export interface MetricsCache { settings: SettingsBody | null; categories: StopCategory[] | null }
 
@@ -95,8 +95,22 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     }));
   });
 
-  /** Sales & Scrap: formula, price source, currency rounding and approver (Finance/Quality) not decided (Q-003, Q-009). */
-  for (const [path, perm] of [['sales', PERMISSIONS.viewSales], ['scrap', PERMISSIONS.viewScrap]] as const) {
+  /** Sales: rumus final (owner 2026-11-18, Q-009): OUTPUT ACTUAL x Harga/PCS dari Master Data. */
+  r.get('/v1/monitoring/sales', requirePermission(PERMISSIONS.viewSales), async (req, res) => {
+    const range = rangeOf(req);
+    const prices = new Map<string, number | null>();
+    for (const p of await repos.master.parts()) {
+      const k = partKey(p.dpNo);
+      if (k) prices.set(k, p.pricePerPcs);
+    }
+    res.json(await envelope(async () => {
+      const cur = await conmas.records(range.from, range.to);
+      return { records: cur.records, invalid: cur.invalidRows, build: (rs) => buildSales(rs, prices, range) };
+    }));
+  });
+
+  /** Scrap: sumber gram dari ConMas sudah jelas, tetapi rumus nilai dan approver (Quality/Finance) belum (Q-009). */
+  for (const [path, perm] of [['scrap', PERMISSIONS.viewScrap]] as const) {
     r.get(`/v1/monitoring/${path}`, requirePermission(perm), (_req, res) => {
       const body: ViewDataEnvelope<null> = {
         state: 'unavailable', data: null, freshness: 'not-applicable', sourceUpdatedAt: null, generatedAt: new Date().toISOString(),

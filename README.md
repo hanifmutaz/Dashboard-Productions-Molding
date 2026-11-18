@@ -46,7 +46,8 @@ npm run verify                     # build:pkgs -> lint -> typecheck -> test -> 
 
 | Area | Alasan | Referensi |
 |---|---|---|
-| Sales, Scrap | Rumus, sumber harga, approver belum ada | Q-009 |
+| Sales | Aktif: OUTPUT ACTUAL × Harga/PCS (Master Data), disetujui owner 2026-11-18 | Q-009 (Sales selesai) |
+| Scrap | Sumber gram dari ConMas jelas; rumus nilai dan approver Quality/Finance belum | Q-009 |
 | CT plan | Tidak ada di sumber | Master Data |
 | OEE, Availability, Performance | Dibaca dari ConMas; "—" bila kolom `CONMAS_COL_OEE/AVAILABILITY/PERFORMANCE` tidak ada di view atau kosong | DEV-008 |
 | Output per jam (Machine Detail hal. 3) | Σ 5 slot QTY PCS per blok jam (disetujui); "—" bila ConMas belum punya QTY PCS | DEV-009 |

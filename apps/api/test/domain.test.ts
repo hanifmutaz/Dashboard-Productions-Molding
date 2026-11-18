@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateRate, bekidoritsu, ipr, kikai, quality, shugyo, sogo } from '../src/modules/metrics/formulas.js';
+import { aggregateRate, bekidoritsu, ipr, kikai, quality, salesValue, scrapKg, scrapRatio, scrapValue, shugyo, sogo } from '../src/modules/metrics/formulas.js';
 import { applyFreshness, currentProductionDate } from '../src/modules/metrics/freshness.js';
 import { normalizeRow, parseHourLabel, parseRate, selectLatest, toIsoWithOffset, type SourceRecord } from '../src/modules/conmas/source.js';
 import { HEADER_COLUMNS, HOUR_BLOCKS } from '../src/modules/conmas/fieldMap.generated.js';
-import { buildMachineDetail, buildMachineList, buildUtilization, buildProduction, eventsOf, hourlyOutput } from '../src/modules/metrics/views.js';
+import { buildMachineDetail, buildMachineList, buildSales, buildUtilization, buildProduction, eventsOf, hourlyOutput } from '../src/modules/metrics/views.js';
 import { categoryResolver } from '../src/modules/metrics/categories.js';
 import { DEFAULT_SETTINGS, SettingsBodySchema, type StopCategory } from '@mpd/contracts';
 
@@ -94,7 +94,7 @@ describe('freshness (FINAL 15/60)', () => {
 describe('production view', () => {
   it('aggregates without inventing values; achievement uses approved bekidoritsu', () => {
     const r = (mc: string, plan: number, actual: number): SourceRecord => ({
-      recordId: mc, date: '2026-11-03', machineNo: mc, shift: '1', group: 'A', cavity: null, plan, actual, gross: null, ngQty: null, dpNo: null, productName: 'P', poNo: null,
+      recordId: mc, date: '2026-11-03', machineNo: mc, shift: '1', group: 'A', cavity: null, plan, actual, gross: null, ngGram: null, ngQty: null, dpNo: null, productName: 'P', poNo: null,
       ctActual: null, plannedMinutes: 480, oee: null, availability: null, performance: null, personnel: { leader: null, cell: null, technician: null, operator: null }, updatedAt: null, slots: [],
     });
     const { resolve } = categoryResolver([]);
@@ -108,7 +108,7 @@ describe('production view', () => {
 
 // ---------- owner decisions 2026-11-17 ----------
 const rec = (o: Partial<SourceRecord> = {}): SourceRecord => ({
-  recordId: 'r', date: '2026-11-03', machineNo: '1', shift: '1', group: 'A', cavity: null, plan: 100, actual: 90, gross: 95, ngQty: 5, dpNo: 'DP1', productName: 'P', poNo: null,
+  recordId: 'r', date: '2026-11-03', machineNo: '1', shift: '1', group: 'A', cavity: null, plan: 100, actual: 90, gross: 95, ngGram: null, ngQty: 5, dpNo: 'DP1', productName: 'P', poNo: null,
   ctActual: null, plannedMinutes: 480, oee: null, availability: null, performance: null,
   personnel: { leader: null, cell: null, technician: null, operator: null }, updatedAt: null, slots: [], ...o,
 });
@@ -201,5 +201,65 @@ describe('shift hours are editable in Settings (owner 2026-11-17)', () => {
     expect(DEFAULT_SETTINGS.backup.restoreTestDays).toBe(7);
     expect(SettingsBodySchema.safeParse({ ...DEFAULT_SETTINGS, backup: { restoreTestDays: 0 } }).success).toBe(false);
     expect(SettingsBodySchema.safeParse({ ...DEFAULT_SETTINGS, backup: { restoreTestDays: 14 } }).success).toBe(true);
+  });
+});
+
+import type pg from 'pg';
+import { createPgRepos } from '../src/db/repos.js';
+describe('session csrf_token dari kolom char(64)', () => {
+  it('membuang spasi pengisi sehingga cocok dengan header X-CSRF-Token', async () => {
+    const token = 'abcDEF_-0123456789abcDEF_-0123456789abcDEF_-';
+    const fake = { query: () => Promise.resolve({ rows: [{ id_hash: 'h', user_id: 'u', csrf_token: token.padEnd(64, ' '), last_seen_at: new Date(), absolute_expires_at: new Date(), revoked_at: null }] }) } as unknown as pg.Pool;
+    const s = await createPgRepos(fake).sessions.get('h');
+    expect(s?.csrfToken).toBe(token);
+  });
+});
+
+describe('Sales & Scrap formulas (Q-009)', () => {
+  it('Sales = good qty x Harga/PCS, tanpa pembulatan, null tidak jadi 0', () => {
+    expect(salesValue(1065, 364.39).value).toBeCloseTo(388075.35, 2);
+    expect(salesValue(0, 364.39).value).toBe(0);
+    expect(salesValue(null, 364.39)).toMatchObject({ value: null });
+    expect(salesValue(100, null)).toMatchObject({ value: null, reason: expect.stringContaining('Harga/PCS') as string });
+    expect(salesValue(-1, 10).value).toBeNull();
+  });
+  it('Scrap kg dari gram ConMas, scrap value = gram x harga per gram', () => {
+    expect(scrapKg(1172).value).toBeCloseTo(1.172, 6);
+    expect(scrapKg(null).value).toBeNull();
+    expect(scrapValue(1172, 0.05).value).toBeCloseTo(58.6, 6);
+    expect(scrapValue(1172, null).value).toBeNull();
+    expect(scrapValue(null, 0.05).value).toBeNull();
+  });
+  it('Scrap ratio = scrap value / sales value x 100; sales 0 atau data kosong -> tidak tersedia', () => {
+    expect(scrapRatio(58.6, 388075.35).value).toBeCloseTo(0.0151, 3);
+    expect(scrapRatio(10, 0).value).toBeNull();
+    expect(scrapRatio(null, 100).value).toBeNull();
+    expect(scrapRatio(0, 100).value).toBe(0);
+  });
+});
+
+describe('buildSales', () => {
+  const range = { from: '2026-11-03', to: '2026-11-04', shift: null, days: 2 };
+  const prices = new Map<string, number | null>([['DP1', 10], ['DP2', null]]);
+  it('Sales = actual x harga; part tanpa harga dilaporkan di uncoveredQty, bukan 0', () => {
+    const v = buildSales([
+      rec({ dpNo: 'dp1 ', actual: 100, date: '2026-11-03' }),
+      rec({ dpNo: 'DP1', actual: 50, date: '2026-11-04', machineNo: '2' }),
+      rec({ dpNo: 'DP2', actual: 30, date: '2026-11-04', machineNo: '3' }),
+    ], prices, range);
+    expect(v.total.value).toBe(1500);
+    expect(v.goodQty).toBe(180);
+    expect(v.coveredQty).toBe(150);
+    expect(v.uncoveredQty).toBe(30);
+    expect(v.averagePrice.value).toBe(10);
+    expect(v.byDay.map((d) => [d.key, d.sales, d.uncoveredQty])).toEqual([['2026-11-03', 1000, 0], ['2026-11-04', 500, 30]]);
+    expect(v.byMonth).toHaveLength(1);
+    expect(v.byPart[0]).toMatchObject({ pricePerPcs: 10, goodQty: 150 });
+    expect(v.byPart.find((p) => p.dpNo === 'DP2')?.sales.value).toBeNull();
+  });
+  it('tanpa harga sama sekali: total tidak tersedia, bukan 0', () => {
+    const v = buildSales([rec({ dpNo: 'DP2', actual: 30 })], prices, range);
+    expect(v.total.value).toBeNull();
+    expect(v.uncoveredQty).toBe(30);
   });
 });

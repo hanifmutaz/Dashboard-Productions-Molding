@@ -96,3 +96,18 @@ export interface MachineListView { date: string; machines: MachineSummary[]; pre
 
 export interface DailyRateRow { date: string; plan: number; actual: number; bekidoritsu: Metric; calendarMinutes: number; plannedMinutes: number; stopMinutes: number; runningMinutes: number; kikai: Metric; sogo: Metric; shugyo: Metric }
 export interface DailyRatesView { machineNo: string | null; productName: string | null; rows: DailyRateRow[] }
+
+/** Sales (Q-009): Rp = OUTPUT ACTUAL x Harga/PCS (Master Data). Part tanpa harga tidak dihitung sebagai 0: qty-nya dilaporkan di uncoveredQty. */
+export interface SalesPeriodRow { key: string; sales: number; goodQty: number; uncoveredQty: number }
+export interface SalesPartRow { dpNo: string | null; productName: string | null; goodQty: number; pricePerPcs: number | null; sales: Metric }
+export interface SalesView {
+  range: { from: string; to: string; days: number };
+  total: Metric;
+  goodQty: number;
+  coveredQty: number;
+  uncoveredQty: number;
+  averagePrice: Metric;
+  byMonth: SalesPeriodRow[];
+  byDay: SalesPeriodRow[];
+  byPart: SalesPartRow[];
+}

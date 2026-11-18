@@ -9,7 +9,7 @@ import { fmt, f1 } from '../lib/format';
 import { presetRange, productionToday } from '../lib/period';
 import { csvRows, parseNum } from '../pages/MasterData';
 import { DataTable } from '../components/table';
-import { ApiFailure, api } from '../lib/api';
+import { ApiFailure, api, setCsrf } from '../lib/api';
 
 const S: Settings = { ...DEFAULT_SETTINGS, version: 0, updatedAt: '', updatedBy: null };
 
@@ -70,5 +70,23 @@ describe('API client', () => {
   it('maps server errors without exposing internals', async () => {
     await expect(api.get('http://localhost/api/forbidden')).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN', requestId: 'r1' });
     await expect(api.get('http://localhost/api/broken')).rejects.toBeInstanceOf(ApiFailure);
+  });
+});
+
+describe('API client: CSRF token basi', () => {
+  it('mengambil token terbaru dari /api/auth/me lalu mengulang sekali', async () => {
+    let calls = 0;
+    server.use(
+      http.get('*/api/auth/me', () => HttpResponse.json({ kind: 'user', csrfToken: 'baru' })),
+      http.put('http://localhost/api/save', ({ request }) => {
+        calls += 1;
+        return request.headers.get('x-csrf-token') === 'baru'
+          ? HttpResponse.json({ ok: true })
+          : HttpResponse.json({ error: { code: 'CSRF', message: 'Sesi keamanan formulir tidak valid. Muat ulang halaman.' } }, { status: 403 });
+      }),
+    );
+    setCsrf('lama');
+    await expect(api.put('http://localhost/api/save', {})).resolves.toEqual({ ok: true });
+    expect(calls).toBe(2);
   });
 });

@@ -60,8 +60,11 @@ describe('authorization (API enforced)', () => {
     const v = await login('viewer');
     await v.agent.get('/api/v1/monitoring/sales').expect(403);
     const a = await login('admin1');
-    const r = await a.agent.get('/api/v1/monitoring/sales').expect(200);
-    expect((r.body as { state: string }).state).toBe('unavailable');
+    await v.agent.get('/api/v1/monitoring/scrap').expect(403);
+    const sales = await a.agent.get('/api/v1/monitoring/sales?from=2026-11-01&to=2026-11-03').expect(200);
+    expect(typeof (sales.body as { state: string }).state).toBe('string');
+    const scrap = await a.agent.get('/api/v1/monitoring/scrap').expect(200);
+    expect((scrap.body as { state: string }).state).toBe('unavailable');
   });
   it('only super admin edits settings; stale version -> 409', async () => {
     const a = await login('admin1');

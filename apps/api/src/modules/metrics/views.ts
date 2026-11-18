@@ -1,11 +1,11 @@
 import {
   SHIFT_START_HOURS, metric, shiftStartsOf, type Metric,
-  type DailyRatesView, type LossGroup, type MachineDetailView, type MachineListView, type MachineProduction, type MachineUtilization, type ProductionTotals, type ProductionView,
+  type DailyRatesView, type LossGroup, type MachineDetailView, type MachineListView, type MachineProduction, type MachineUtilization, type ProductionTotals, type ProductionView, type SalesPartRow, type SalesPeriodRow, type SalesView,
   type SettingsBody, type StopCategoryRef, type StopTimeView, type UtilizationTotals, type UtilizationView,
 } from '@mpd/contracts';
 import { machineSort, type SourceRecord } from '../conmas/source.js';
 import { GROUPS } from './categories.js';
-import { aggregateRate, bekidoritsu, ipr, kikai, quality, shugyo, sogo, sumNullable } from './formulas.js';
+import { aggregateRate, bekidoritsu, ipr, kikai, quality, salesValue, shugyo, sogo, sumNullable } from './formulas.js';
 
 export interface Ev { date: string; shift: '1' | '2' | '3'; machineNo: string; productName: string | null; cat: StopCategoryRef; detail: string; minutes: number; startMinuteOfDay: number }
 export type Resolve = (text: string) => StopCategoryRef;
@@ -295,5 +295,42 @@ export function buildDailyRates(records: SourceRecord[], range: Range, machineNo
       const cal = d.length ? machines * calPer : 0;
       return { date, plan, actual, bekidoritsu: bekidoritsu(actual, plan), calendarMinutes: cal, plannedMinutes: planned, stopMinutes: stop, runningMinutes: Math.max(0, planned - stop), kikai: kikai(planned, stop), sogo: sogo(planned, stop, cal), shugyo: shugyo(planned, cal) };
     }),
+  };
+}
+
+// ---------------- Sales (Q-009) ----------------
+/** Kunci pencocokan DP Part antara ConMas dan Master Data: tanpa spasi pinggir, tidak peka huruf besar/kecil. */
+export const partKey = (dpNo: string | null): string | null => (dpNo?.trim() ? dpNo.trim().toUpperCase() : null);
+
+export function buildSales(records: SourceRecord[], prices: ReadonlyMap<string, number | null>, range: Range): SalesView {
+  const rs = filterShift(records, range.shift);
+  const priceOf = (r: SourceRecord) => { const k = partKey(r.dpNo); return k ? prices.get(k) ?? null : null; };
+  const line = (r: SourceRecord) => {
+    const qty = r.actual !== null && r.actual > 0 ? r.actual : 0;
+    const s = salesValue(r.actual, priceOf(r));
+    return s.value === null ? { sales: 0, qty, uncovered: qty } : { sales: s.value, qty, uncovered: 0 };
+  };
+  const roll = (key: string, list: SourceRecord[]): SalesPeriodRow => {
+    const l = list.map(line);
+    return { key, sales: sum(l, (x) => x.sales), goodQty: sum(l, (x) => x.qty), uncoveredQty: sum(l, (x) => x.uncovered) };
+  };
+  const byDate = groupBy(rs, (r) => r.date);
+  const byMonthMap = groupBy(rs, (r) => r.date.slice(0, 7));
+  const all = rs.map(line);
+  const goodQty = sum(all, (x) => x.qty), uncoveredQty = sum(all, (x) => x.uncovered), coveredQty = goodQty - uncoveredQty, totalRp = sum(all, (x) => x.sales);
+  const total = coveredQty > 0 ? metric(totalRp) : metric(null, goodQty > 0 ? 'Harga/PCS belum diisi di Master Data untuk part pada periode ini' : 'Tidak ada output pada periode ini');
+  const byPart: SalesPartRow[] = [...groupBy(rs, (r) => partKey(r.dpNo) ?? '—').entries()].map(([k, list]) => {
+    const qty = sum(list.map(line), (x) => x.qty);
+    const price = k === '—' ? null : prices.get(k) ?? null;
+    const latest = [...list].reverse().find((r) => r.productName);
+    return { dpNo: k === '—' ? null : (list.find((r) => r.dpNo)?.dpNo ?? k), productName: latest?.productName ?? null, goodQty: qty, pricePerPcs: price, sales: salesValue(qty, price) };
+  }).sort((a, b) => (b.sales.value ?? -1) - (a.sales.value ?? -1) || b.goodQty - a.goodQty);
+  return {
+    range: { from: range.from, to: range.to, days: range.days },
+    total, goodQty, coveredQty, uncoveredQty,
+    averagePrice: coveredQty > 0 ? metric(totalRp / coveredQty) : metric(null, 'Belum ada output berharga'),
+    byMonth: [...byMonthMap.keys()].sort().map((k) => roll(k, byMonthMap.get(k)!)),
+    byDay: datesIn(range.from, range.to).map((d) => roll(d, byDate.get(d) ?? [])),
+    byPart,
   };
 }
