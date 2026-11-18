@@ -1,11 +1,11 @@
 import {
   SHIFT_START_HOURS, metric, shiftStartsOf, type Metric,
-  type DailyRatesView, type LossGroup, type MachineDetailView, type MachineListView, type MachineProduction, type MachineUtilization, type ProductionTotals, type ProductionView, type SalesPartRow, type SalesPeriodRow, type SalesView,
+  type DailyRatesView, type LossGroup, type MachineDetailView, type MachineListView, type MachineProduction, type MachineUtilization, type ProductionTotals, type ProductionView, type ScrapMaterialRow, type ScrapPartRow, type ScrapPeriodRow, type ScrapView, type SalesPartRow, type SalesPeriodRow, type SalesView,
   type SettingsBody, type StopCategoryRef, type StopTimeView, type UtilizationTotals, type UtilizationView,
 } from '@mpd/contracts';
 import { machineSort, type SourceRecord } from '../conmas/source.js';
 import { GROUPS } from './categories.js';
-import { aggregateRate, bekidoritsu, ipr, kikai, quality, salesValue, shugyo, sogo, sumNullable } from './formulas.js';
+import { aggregateRate, bekidoritsu, ipr, kikai, quality, salesValue, scrapKg, scrapRatio, scrapValue, shugyo, sogo, sumNullable } from './formulas.js';
 
 export interface Ev { date: string; shift: '1' | '2' | '3'; machineNo: string; productName: string | null; cat: StopCategoryRef; detail: string; minutes: number; startMinuteOfDay: number }
 export type Resolve = (text: string) => StopCategoryRef;
@@ -332,5 +332,65 @@ export function buildSales(records: SourceRecord[], prices: ReadonlyMap<string, 
     byMonth: [...byMonthMap.keys()].sort().map((k) => roll(k, byMonthMap.get(k)!)),
     byDay: datesIn(range.from, range.to).map((d) => roll(d, byDate.get(d) ?? [])),
     byPart,
+  };
+}
+
+// ---------------- Scrap (Q-009; rumus nilai PROPOSED) ----------------
+export interface ScrapPart { materialCode: string | null; pricePerPcs: number | null }
+export interface ScrapMaterial { name: string; pricePerGram: number | null }
+/** Per-material price above this (Rp/gram) is implausible for moulding resin and usually means the CSV price is per kg. */
+export const PRICE_PER_GRAM_SUSPECT = 10_000;
+
+export function buildScrap(records: SourceRecord[], parts: ReadonlyMap<string, ScrapPart>, materials: ReadonlyMap<string, ScrapMaterial>, range: Range): ScrapView {
+  const rs = filterShift(records, range.shift);
+  const line = (r: SourceRecord) => {
+    const k = partKey(r.dpNo), part = k ? parts.get(k) ?? null : null;
+    const code = part?.materialCode ?? null, price = (code ? materials.get(code)?.pricePerGram : null) ?? null;
+    const gram = r.ngGram !== null && r.ngGram >= 0 ? r.ngGram : null;
+    const value = scrapValue(r.ngGram, price).value, sales = salesValue(r.actual, part?.pricePerPcs ?? null).value;
+    return { r, code, price, gram, value, sales, qty: r.actual !== null && r.actual > 0 ? r.actual : 0 };
+  };
+  type L = ReturnType<typeof line>;
+  const agg = (ls: L[]) => {
+    const haveGram = ls.some((l) => l.gram !== null), valued = ls.filter((l) => l.value !== null), matched = ls.filter((l) => l.value !== null && l.sales !== null);
+    return {
+      haveGram, haveValue: valued.length > 0, matchedN: matched.length,
+      gram: sum(ls, (l) => l.gram ?? 0), value: sum(valued, (l) => l.value!), unvaluedGram: sum(ls, (l) => (l.gram !== null && l.value === null ? l.gram : 0)),
+      matchedScrap: sum(matched, (l) => l.value!), matchedSales: sum(matched, (l) => l.sales!),
+    };
+  };
+  const noVal = (haveGram: boolean) => metric(null, haveGram ? 'Harga material per gram belum diisi di Master Data untuk part pada periode ini' : 'NG (gram) belum tersedia dari ConMas pada periode ini');
+  const ratioOf = (a: ReturnType<typeof agg>) => (a.matchedN ? scrapRatio(a.matchedScrap, a.matchedSales) : metric(null, 'Belum ada record dengan scrap value dan sales sekaligus'));
+  const roll = (key: string, list: SourceRecord[]): ScrapPeriodRow => {
+    const ls = list.map(line), a = agg(ls);
+    const mats = [...groupBy(ls.filter((l) => l.value !== null), (l) => l.code).entries()].map(([code, g]) => ({ code, value: sum(g, (l) => l.value!) })).sort((x, y) => y.value - x.value);
+    return { key, scrapGram: a.gram, scrapValue: a.value, unvaluedGram: a.unvaluedGram, ratio: ratioOf(a), materials: mats };
+  };
+  const all = rs.map(line), tot = agg(all);
+  const byDate = groupBy(rs, (r) => r.date), byMonthMap = groupBy(rs, (r) => r.date.slice(0, 7));
+  const byMaterial: ScrapMaterialRow[] = [...groupBy(all, (l) => l.code).entries()].map(([code, ls]) => {
+    const a = agg(ls), m = code ? materials.get(code) ?? null : null;
+    return { code, name: m?.name ?? null, pricePerGram: m?.pricePerGram ?? null, scrapGram: a.gram, scrapValue: a.haveValue ? metric(a.value) : noVal(a.haveGram) };
+  }).sort((x, y) => (y.scrapValue.value ?? -1) - (x.scrapValue.value ?? -1) || y.scrapGram - x.scrapGram);
+  const byPart: ScrapPartRow[] = [...groupBy(all, (l) => partKey(l.r.dpNo) ?? '—').entries()].map(([k, ls]) => {
+    const a = agg(ls), part = k === '—' ? null : parts.get(k) ?? null, code = part?.materialCode ?? null, m = code ? materials.get(code) ?? null : null;
+    const goodQty = sum(ls, (l) => l.qty), pcs = part?.pricePerPcs ?? null;
+    return {
+      dpNo: k === '—' ? null : (ls.find((l) => l.r.dpNo)?.r.dpNo ?? k), productName: [...ls].reverse().find((l) => l.r.productName)?.r.productName ?? null,
+      materialCode: code, materialName: m?.name ?? null, pricePerGram: m?.pricePerGram ?? null, pricePerPcs: pcs, goodQty,
+      scrapGram: a.haveGram ? a.gram : null, scrapKg: a.haveGram ? scrapKg(a.gram) : metric(null, 'NG (gram) belum tersedia dari ConMas'),
+      scrapValue: a.haveValue ? metric(a.value) : noVal(a.haveGram), sales: salesValue(goodQty, pcs), ratio: ratioOf(a),
+    };
+  }).sort((x, y) => (y.scrapValue.value ?? -1) - (x.scrapValue.value ?? -1) || (y.scrapGram ?? -1) - (x.scrapGram ?? -1));
+  return {
+    range: { from: range.from, to: range.to, days: range.days },
+    scrapValue: tot.haveValue ? metric(tot.value) : noVal(tot.haveGram),
+    scrapKg: tot.haveGram ? scrapKg(tot.gram) : metric(null, 'NG (gram) belum tersedia dari ConMas pada periode ini'),
+    ratio: ratioOf(tot), scrapGram: tot.gram, unvaluedGram: tot.unvaluedGram,
+    recordsTotal: rs.length, recordsWithoutGram: rs.filter((r) => r.ngGram === null).length,
+    priceUnitSuspect: all.some((l) => l.value !== null && l.price !== null && l.price >= PRICE_PER_GRAM_SUSPECT),
+    byMonth: [...byMonthMap.keys()].sort().map((k) => roll(k, byMonthMap.get(k)!)),
+    byDay: datesIn(range.from, range.to).map((d) => roll(d, byDate.get(d) ?? [])),
+    byMaterial, byPart,
   };
 }

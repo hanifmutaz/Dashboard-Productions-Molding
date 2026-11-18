@@ -3,7 +3,7 @@ import { aggregateRate, bekidoritsu, ipr, kikai, quality, salesValue, scrapKg, s
 import { applyFreshness, currentProductionDate } from '../src/modules/metrics/freshness.js';
 import { normalizeRow, parseHourLabel, parseRate, selectLatest, toIsoWithOffset, type SourceRecord } from '../src/modules/conmas/source.js';
 import { HEADER_COLUMNS, HOUR_BLOCKS } from '../src/modules/conmas/fieldMap.generated.js';
-import { buildMachineDetail, buildMachineList, buildSales, buildUtilization, buildProduction, eventsOf, hourlyOutput } from '../src/modules/metrics/views.js';
+import { buildMachineDetail, buildMachineList, buildSales, buildScrap, buildUtilization, buildProduction, eventsOf, hourlyOutput } from '../src/modules/metrics/views.js';
 import { categoryResolver } from '../src/modules/metrics/categories.js';
 import { DEFAULT_SETTINGS, SettingsBodySchema, type StopCategory } from '@mpd/contracts';
 
@@ -261,5 +261,64 @@ describe('buildSales', () => {
     const v = buildSales([rec({ dpNo: 'DP2', actual: 30 })], prices, range);
     expect(v.total.value).toBeNull();
     expect(v.uncoveredQty).toBe(30);
+  });
+});
+
+describe('buildScrap (NG gram ConMas x harga material per gram)', () => {
+  const rg = { from: '2026-11-03', to: '2026-11-04', shift: null, days: 2 };
+  const parts = new Map([['DP1', { materialCode: 'M1', pricePerPcs: 10 }], ['DP2', { materialCode: 'M2', pricePerPcs: 5 }], ['DP3', { materialCode: null, pricePerPcs: 5 }]]);
+  const mats = new Map([['M1', { name: 'PPS', pricePerGram: 0.2 }], ['M2', { name: 'LCP', pricePerGram: null }]]);
+  const rows = [
+    rec({ dpNo: 'dp1 ', actual: 1000, ngGram: 500, date: '2026-11-03' }),
+    rec({ dpNo: 'DP1', actual: 1000, ngGram: 300, date: '2026-11-04', machineNo: '2' }),
+    rec({ dpNo: 'DP2', actual: 100, ngGram: 400, date: '2026-11-04', machineNo: '3' }),
+    rec({ dpNo: 'DP3', actual: 100, ngGram: 50, date: '2026-11-04', machineNo: '4' }),
+    rec({ dpNo: 'DP1', actual: 1000, ngGram: null, date: '2026-11-04', machineNo: '5' }),
+  ];
+  it('kg dari gram, nilai = gram x harga per gram, record tanpa harga material tidak jadi Rp 0', () => {
+    const v = buildScrap(rows, parts, mats, rg);
+    expect(v.scrapKg.value).toBeCloseTo(1.25, 9); // 500+300+400+50 gram
+    expect(v.scrapValue.value).toBeCloseTo(160, 9); // (500+300) x 0.2
+    expect(v.unvaluedGram).toBe(450); // DP2 (material tanpa harga) + DP3 (part tanpa material)
+    expect(v.recordsTotal).toBe(5);
+    expect(v.recordsWithoutGram).toBe(1);
+    expect(v.priceUnitSuspect).toBe(false);
+  });
+  it('ratio = scrap value / sales hanya dari record yang punya keduanya (record tanpa NG gram tidak menambah penyebut)', () => {
+    const v = buildScrap(rows, parts, mats, rg);
+    expect(v.ratio.value).toBeCloseTo((160 / 20000) * 100, 9); // sales 2 record bergram = 2 x 1000 x 10
+    const d = v.byDay.find((x) => x.key === '2026-11-04')!;
+    expect(d.scrapValue).toBeCloseTo(60, 9);
+    expect(d.ratio.value).toBeCloseTo((60 / 10000) * 100, 9);
+  });
+  it('rincian per material dan per part', () => {
+    const v = buildScrap(rows, parts, mats, rg);
+    expect(v.byMaterial[0]).toMatchObject({ code: 'M1', name: 'PPS', scrapGram: 800 });
+    expect(v.byMaterial[0]!.scrapValue.value).toBeCloseTo(160, 9);
+    expect(v.byMaterial.find((m) => m.code === 'M2')!.scrapValue.value).toBeNull();
+    expect(v.byMaterial.find((m) => m.code === null)!.scrapGram).toBe(50);
+    const dp1 = v.byPart.find((p) => p.materialCode === 'M1')!;
+    expect(dp1).toMatchObject({ materialName: 'PPS', goodQty: 3000, scrapGram: 800 });
+    expect(dp1.scrapKg.value).toBeCloseTo(0.8, 9);
+    expect(dp1.sales.value).toBe(30000);
+    expect(v.byMonth[0]!.materials[0]).toMatchObject({ code: 'M1' });
+  });
+  it('tanpa NG gram sama sekali: tidak tersedia, bukan 0', () => {
+    const v = buildScrap([rec({ dpNo: 'DP1', ngGram: null })], parts, mats, rg);
+    expect(v.scrapKg.value).toBeNull();
+    expect(v.scrapValue.value).toBeNull();
+    expect(v.ratio.value).toBeNull();
+    expect(v.byPart[0]!.scrapGram).toBeNull();
+  });
+  it('NG gram 0 adalah 0 yang sah, dan harga >= Rp 10.000/gram ditandai kemungkinan per kg', () => {
+    const zero = buildScrap([rec({ dpNo: 'DP1', ngGram: 0, actual: 10 })], parts, mats, rg);
+    expect(zero.scrapValue.value).toBe(0);
+    expect(zero.ratio.value).toBe(0);
+    const big = buildScrap([rec({ dpNo: 'DP1', ngGram: 10 })], parts, new Map([['M1', { name: 'PPS', pricePerGram: 212902.3 }]]), rg);
+    expect(big.priceUnitSuspect).toBe(true);
+  });
+  it('filter shift dipakai', () => {
+    const v = buildScrap([rec({ dpNo: 'DP1', ngGram: 100, shift: '1' }), rec({ dpNo: 'DP1', ngGram: 900, shift: '2', machineNo: '2' })], parts, mats, { ...rg, shift: '2' });
+    expect(v.scrapGram).toBe(900);
   });
 });

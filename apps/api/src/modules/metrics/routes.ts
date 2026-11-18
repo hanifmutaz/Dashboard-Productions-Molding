@@ -11,7 +11,7 @@ import { SourceUnavailable, type ConmasSource, type SourceRecord } from '../conm
 import { readSettings } from '../settings/routes.js';
 import { categoryResolver } from './categories.js';
 import { applyFreshness, currentProductionDate } from './freshness.js';
-import { buildDailyRates, buildMachineDetail, buildMachineList, buildProduction, buildSales, buildStopTime, buildUtilization, partKey, daysBetween, filterMachines, type Range } from './views.js';
+import { buildDailyRates, buildMachineDetail, buildMachineList, buildProduction, buildSales, buildScrap, buildStopTime, buildUtilization, partKey, daysBetween, filterMachines, type Range, type ScrapMaterial, type ScrapPart } from './views.js';
 
 export interface MetricsCache { settings: SettingsBody | null; categories: StopCategory[] | null }
 
@@ -109,16 +109,18 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     }));
   });
 
-  /** Scrap: sumber gram dari ConMas sudah jelas, tetapi rumus nilai dan approver (Quality/Finance) belum (Q-009). */
-  for (const [path, perm] of [['scrap', PERMISSIONS.viewScrap]] as const) {
-    r.get(`/v1/monitoring/${path}`, requirePermission(perm), (_req, res) => {
-      const body: ViewDataEnvelope<null> = {
-        state: 'unavailable', data: null, freshness: 'not-applicable', sourceUpdatedAt: null, generatedAt: new Date().toISOString(),
-        notices: [{ code: 'Q-009', message: 'Rumus, sumber harga dan approver Sales/Scrap belum ditetapkan. Angka tidak ditampilkan sampai disetujui.' }],
-      };
-      res.json(body);
-    });
-  }
+  /** Scrap: NG (gram) ConMas x harga material per gram (Master Data: part -> material). Rumus nilai PROPOSED (menunggu approver Quality/Finance). */
+  r.get('/v1/monitoring/scrap', requirePermission(PERMISSIONS.viewScrap), async (req, res) => {
+    const range = rangeOf(req);
+    const [partRows, matRows] = await Promise.all([repos.master.parts(), repos.master.materials()]);
+    const parts = new Map<string, ScrapPart>(), materials = new Map<string, ScrapMaterial>();
+    for (const p of partRows) { const k = partKey(p.dpNo); if (k) parts.set(k, { materialCode: p.materialCode, pricePerPcs: p.pricePerPcs }); }
+    for (const m of matRows) materials.set(m.code, { name: m.name, pricePerGram: m.pricePerGram });
+    res.json(await envelope(async () => {
+      const cur = await conmas.records(range.from, range.to);
+      return { records: cur.records, invalid: cur.invalidRows, build: (rs) => buildScrap(rs, parts, materials, range) };
+    }));
+  });
 
   const DateQuery = z.object({ date: IsoDate.optional() });
   r.get('/v1/machines', requirePermission(PERMISSIONS.viewMachineDetail), async (req, res) => {

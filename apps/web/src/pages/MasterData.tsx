@@ -1,12 +1,13 @@
 import { useState, type DragEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PERMISSIONS, type MasterDataView, type Material, type Part } from '@mpd/contracts';
+import { PERMISSIONS, type MasterDataView, type Material, type Part, type StopCategory } from '@mpd/contracts';
 import { ApiFailure, api } from '../lib/api';
 import { useSession } from '../lib/session';
 import { fmtPrice, tokenColor } from '../lib/format';
 import { Kpi } from '../components/kpi';
 import { DataTable, downloadCsv } from '../components/table';
 import { Tabs, useToast } from '../components/ui';
+import { StopCategoryEditor } from './StopCategoryEditor';
 
 /* ---------- CSV helpers (client preview only; server validates again on apply) ---------- */
 export function csvRows(t: string): string[][] {
@@ -39,7 +40,29 @@ export function parseNum(raw: string, mode: 'int' | 'dec'): number {
   return Number(p[0] + '.' + p[1]);
 }
 
-interface Row<T> { line: number; raw: string[]; value?: T; err?: string; warn?: string; status?: 'new' | 'changed' | 'unchanged' }
+export interface Row<T> { line: number; raw: string[]; value?: T; err?: string; warn?: string; status?: 'new' | 'changed' | 'unchanged' }
+
+export interface MatRow { dpNo: string; part: Part | null; code: string; name: string; price: number }
+/** One CSV row of the material upload. DP Part may be empty: the row then only defines the material (code, name, price/g)
+ *  and no part→material mapping is written. Identical repeats of the same material are merged. */
+export function parseMaterialRow(r: string[], acc: Row<MatRow>[], partBy: Map<string, Part>, matBy: Map<string, Material>): Row<MatRow> {
+  const dp = (r[1] ?? '').trim(), code = (r[3] ?? '').trim(), name = (r[4] ?? '').trim(), price = parseNum(r[5] ?? '', 'dec');
+  if (!code) return { line: 0, raw: r, err: 'DP Material is empty' };
+  if (!name) return { line: 0, raw: r, err: 'Material Name is empty' };
+  if (!(price > 0)) return { line: 0, raw: r, err: 'invalid Price material/g' };
+  const first = acc.find((a) => a.value?.code === code);
+  if (first && first.value!.price !== price) return { line: 0, raw: r, err: `${code} price conflicts with row ${first.line}` };
+  if (first && first.value!.name !== name) return { line: 0, raw: r, err: `${code} name differs from row ${first.line}` };
+  const other = dp ? acc.find((a) => a.value?.dpNo.toLowerCase() === dp.toLowerCase() && a.value.code !== code) : undefined;
+  if (other) return { line: 0, raw: r, err: `DP Part ${dp} already uses ${other.value!.code} in row ${other.line}` };
+  const part = dp ? partBy.get(dp.toLowerCase()) ?? null : null, cur = matBy.get(code);
+  const changed = !cur || cur.pricePerGram !== price || cur.name !== name || (!!dp && part?.materialCode !== code);
+  const warns: string[] = [];
+  if (cur?.pricePerGram && Math.abs(price - cur.pricePerGram) / cur.pricePerGram > 0.5) warns.push('large price change – check the separator');
+  if (price >= 10_000) warns.push('Rp ≥ 10.000 per gram looks like a per-kg price – check the unit');
+  if (first && !dp) warns.push(`same material as row ${first.line} – merged`);
+  return { line: 0, raw: r, value: { dpNo: part?.dpNo ?? dp, part, code, name, price }, status: first ? 'unchanged' : changed ? (cur ? 'changed' : 'new') : 'unchanged', warn: warns.join(' · ') || undefined };
+}
 
 function Uploader<T>({ id, title, sub, expected, cols, parse, onApply, template, disabled }: {
   id: string; title: string; sub: string; expected: string[]; cols: [string, (v: T) => string][];
@@ -115,6 +138,8 @@ export function MasterDataPage() {
   const toast = useToast();
   const qc = useQueryClient();
   const editable = can(PERMISSIONS.editMasterData);
+  const canCats = can(PERMISSIONS.editStopCategories);
+  const [editCat, setEditCat] = useState<StopCategory | 'new' | null>(null);
   const q = useQuery({ queryKey: ['master-data'], queryFn: () => api.get<MasterDataView>('/api/master-data') });
   const [tab, setTab] = useState<'master-0' | 'master-1' | 'master-2' | 'master-3'>('master-0');
   const [pq, setPq] = useState('');
@@ -202,24 +227,15 @@ export function MasterDataPage() {
         )}
         {tab === 'master-1' && (
           <div className="pane on"><div className="master-stack">
-            <Uploader<{ dpNo: string; part: Part | null; code: string; name: string; price: number }> id="imm-file" title="Upload CSV · Master data material" sub="One row per DP Part · the same DP Material must have the same price in every row" disabled={!editable}
-              expected={['No', 'DP Part', 'Part Name', 'DP Material', 'Material Name', 'Price material/g']} cols={[['DP Part', (x) => x.dpNo], ['DP Material', (x) => x.code], ['Material Name', (x) => x.name], ['Price/g', (x) => 'Rp ' + x.price]]}
-              parse={(r, acc) => {
-                const dp = r[1]!.trim(), code = r[3]!.trim(), name = r[4]!.trim(), price = parseNum(r[5]!, 'dec');
-                if (!dp) return { line: 0, raw: r, err: 'DP Part is empty' };
-                if (!code) return { line: 0, raw: r, err: 'DP Material is empty' };
-                if (!name) return { line: 0, raw: r, err: 'Material Name is empty' };
-                if (!(price > 0)) return { line: 0, raw: r, err: 'invalid Price material/g' };
-                const first = acc.find((a) => a.value?.code === code);
-                if (first && first.value!.price !== price) return { line: 0, raw: r, err: `${code} price conflicts with row ${first.line}` };
-                const part = partBy.get(dp.toLowerCase()) ?? null, cur = matBy.get(code);
-                return { line: 0, raw: r, value: { dpNo: part?.dpNo ?? dp, part, code, name, price }, status: !cur ? 'new' : cur.pricePerGram !== price || cur.name !== name || part?.materialCode !== code ? 'changed' : 'unchanged',
-                  warn: cur?.pricePerGram && Math.abs(price - cur.pricePerGram) / cur.pricePerGram > 0.5 ? 'large price change – check the separator' : undefined };
-              }}
+            <Uploader<MatRow> id="imm-file" title="Upload CSV · Master data material" sub="Leave DP Part empty to upload the material list only · with DP Part it also maps that part to the material · the same DP Material must have the same price" disabled={!editable}
+              expected={['No', 'DP Part', 'Part Name', 'DP Material', 'Material Name', 'Price material/g']} cols={[['DP Part', (x) => x.dpNo || '—'], ['DP Material', (x) => x.code], ['Material Name', (x) => x.name], ['Price/g', (x) => 'Rp ' + x.price]]}
+              parse={(r, acc) => parseMaterialRow(r, acc, partBy, matBy)}
               onApply={(rows) => {
                 const uniq = new Map<string, { code: string; name: string; pricePerGram: number; version: number | null }>();
                 rows.forEach((x) => uniq.set(x.code, { code: x.code, name: x.name, pricePerGram: x.price, version: matBy.get(x.code)?.version ?? null }));
-                return saveMats.mutateAsync({ materials: [...uniq.values()], partMaterials: rows.map((x) => ({ dpNo: x.dpNo, materialCode: x.code, version: x.part?.version ?? null })) }).then(() => undefined);
+                const mapped = new Map<string, { dpNo: string; materialCode: string; version: number | null }>();
+                rows.filter((x) => x.dpNo).forEach((x) => mapped.set(x.dpNo.toLowerCase(), { dpNo: x.dpNo, materialCode: x.code, version: x.part?.version ?? null }));
+                return saveMats.mutateAsync({ materials: [...uniq.values()], partMaterials: [...mapped.values()] }).then(() => undefined);
               }}
               template={() => downloadCsv('master_data_material.csv', [['No', 'DP Part', 'Part Name', 'DP Material', 'Material Name', 'Price material/g'], ...parts.map((p, i) => { const m = p.materialCode ? matBy.get(p.materialCode) : undefined; return [i + 1, p.dpNo, p.name, m?.code ?? '', m?.name ?? '', m?.pricePerGram ?? '']; })])} />
             <div className="card"><div className="ch"><div><h3>Material &amp; price</h3><p>Scrap value formula is pending approval (Q-009)</p></div></div>
@@ -249,6 +265,7 @@ export function MasterDataPage() {
         {tab === 'master-2' && (
           <div className="pane on"><div className="card">
             <div className="ch"><div><h3>Stop categories &amp; details</h3><p>{cats.length} categories · click a category (›) to see its details and ConMas aliases · loss group and OEE bucket are defaults to be confirmed by Molding</p></div>
+              {canCats && <button className="btn pri" type="button" onClick={() => setEditCat('new')}>Add category</button>}
               <input className="srch" placeholder="Search category or detail…" style={{ width: 'var(--s-size-240)', margin: 0 }} value={cq} onChange={(e) => setCq(e.target.value)} aria-label="Search category" /></div>
             <div className="cb" style={{ padding: 'var(--s-size-12) 0 0' }}>
               <DataTable wrapStyle={{ maxHeight: 'none' }} rows={cats.filter((c) => !cq || c.name.toLowerCase().includes(cq.toLowerCase()) || c.details.some((d) => d.toLowerCase().includes(cq.toLowerCase())))} rowKey={(c) => c.id} sort={{ k: 'sort', asc: true }}
@@ -259,6 +276,7 @@ export function MasterDataPage() {
                   { k: 'loss', h: 'Counted as loss', nos: true, f: (c) => (c.infoOnly ? <span className="chip warn">No · info only</span> : <span className="chip good">Yes</span>) },
                   { k: 'n', h: 'Details', n: true, nos: true, cl: 'm', f: (c) => c.details.length },
                   { k: 'notes', h: 'Notes', nos: true, cl: 'mu wrap', f: (c) => c.notes ?? (c.infoOnly ? 'Excluded from stop time & loss by default – confirm' : '') },
+                  ...(canCats ? [{ k: 'edit', h: '', nos: true, f: (c: StopCategory) => <button className="btn" type="button" aria-label={`Edit ${c.short}`} onClick={(e) => { e.stopPropagation(); setEditCat(c); }}>Edit</button> }] : []),
                 ]}
                 expand={(c) => (
                   <div style={{ maxWidth: 'none' }}>
@@ -266,10 +284,11 @@ export function MasterDataPage() {
                     <div className="dl">{c.details.map((d) => <span key={d} style={cq && d.toLowerCase().includes(cq.toLowerCase()) ? { borderColor: 'var(--primary)', color: 'var(--primary)', fontWeight: 'var(--c-font-weight-600)' } : undefined}>{d}</span>)}</div>
                   </div>
                 )} />
-              <div className="tfoot"><span>Editing and Excel upload of categories is planned. ConMas categories that are not in this list show as “Unmapped”.</span></div>
+              <div className="tfoot"><span>{canCats ? 'Edit a category to change its details, aliases, loss group or colour.' : 'Editing is limited to roles with the “Edit Stop categories & details” permission.'} ConMas categories that are not in this list show as “Unmapped”.</span></div>
             </div>
           </div></div>
         )}
+        {editCat && <StopCategoryEditor cat={editCat === 'new' ? null : editCat} onClose={() => setEditCat(null)} />}
         {tab === 'master-3' && (
           <div className="pane on"><div className="card">
             <div className="ch"><div><h3>Machines</h3><p>Read from ConMas · latest part and cavity per machine (last 30 days)</p></div></div>

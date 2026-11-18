@@ -111,3 +111,30 @@ export interface SalesView {
   byDay: SalesPeriodRow[];
   byPart: SalesPartRow[];
 }
+
+/** Scrap (Q-009): NG (gram) ConMas -> kg; Rp = gram x harga material per gram (part -> material, Master Data). Rumus nilai PROPOSED.
+ *  Record tanpa NG gram atau tanpa harga material tidak dihitung sebagai 0: gram-nya dilaporkan di unvaluedGram / recordsWithoutGram.
+ *  Ratio = scrap value / sales hanya dari record yang punya keduanya (agar pembilang dan penyebut sebanding). */
+export interface ScrapPeriodRow { key: string; scrapGram: number; scrapValue: number; unvaluedGram: number; ratio: Metric; materials: { code: string | null; value: number }[] }
+export interface ScrapMaterialRow { code: string | null; name: string | null; pricePerGram: number | null; scrapGram: number; scrapValue: Metric }
+export interface ScrapPartRow {
+  dpNo: string | null; productName: string | null; materialCode: string | null; materialName: string | null; pricePerGram: number | null; pricePerPcs: number | null;
+  goodQty: number; scrapGram: number | null; scrapKg: Metric; scrapValue: Metric; sales: Metric; ratio: Metric;
+}
+export interface ScrapView {
+  range: { from: string; to: string; days: number };
+  scrapValue: Metric;
+  scrapKg: Metric;
+  ratio: Metric;
+  scrapGram: number;
+  /** Gram NG yang belum bisa dinilai karena part belum punya material / material belum punya harga. */
+  unvaluedGram: number;
+  recordsTotal: number;
+  recordsWithoutGram: number;
+  /** true bila harga material yang dipakai >= Rp 10.000 per gram (kemungkinan satuan per kg). */
+  priceUnitSuspect: boolean;
+  byMonth: ScrapPeriodRow[];
+  byDay: ScrapPeriodRow[];
+  byMaterial: ScrapMaterialRow[];
+  byPart: ScrapPartRow[];
+}

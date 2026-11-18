@@ -44,4 +44,4 @@ Timezone sumber: Asia/Bangkok (+07:00).
 - **Scrap (kg)** = NG (GRAM) `1_45_n` ÷ 1000. Sumber ConMas, satuan gram (dikonfirmasi owner).
 - **Scrap value (Rp)** = NG (gram) × harga material per gram (Master Data: part → material → `price_per_gram`). **PROPOSED**, menunggu approver Quality/Finance.
 - **Scrap ratio (%)** = scrap value ÷ sales value × 100 (definisi Molding).
-- Rumus ada di `apps/api/src/modules/metrics/formulas.ts` (tanpa pembulatan; pembulatan Rupiah hanya di tampilan, Q-003). Route `/v1/monitoring/sales|scrap` belum memakainya.
+- Rumus ada di `apps/api/src/modules/metrics/formulas.ts` (tanpa pembulatan; pembulatan Rupiah hanya di tampilan, Q-003). Route `/v1/monitoring/sales` (buildSales) dan `/v1/monitoring/scrap` (buildScrap) memakainya. Scrap: record tanpa NG gram, atau part tanpa material/harga, tidak dihitung sebagai 0 (dilaporkan sebagai `recordsWithoutGram` / `unvaluedGram`); ratio hanya dari record yang punya scrap value dan sales sekaligus. UI memberi peringatan bila harga material ≥ Rp 10.000/gram (kemungkinan satuan per kg).

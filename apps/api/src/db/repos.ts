@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
-import type { AuditEntry, KioskDevice, Material, Part, SettingsBody, StopCategory } from '@mpd/contracts';
+import type { AuditEntry, KioskDevice, Material, Part, SettingsBody, StopCategory, StopCategoryInput } from '@mpd/contracts';
 import type { Queryable } from './pools.js';
 import { withTransaction } from './pools.js';
 
@@ -54,6 +54,9 @@ export interface Repos {
       parts: { dpNo: string; materialCode: string; version: number | null }[],
       actor: string,
     ): Promise<string[]>;
+    /** Insert (version null) or update with optimistic version check. `id` is already resolved by the caller. False = conflict. */
+    saveCategory(c: Omit<StopCategoryInput, 'id'> & { id: string }): Promise<boolean>;
+    deleteCategory(id: string, version: number): Promise<boolean>;
   };
   kiosks: {
     createPairing(p: { codeHash: string; name: string; machineNo: string; expiresAt: Date; createdBy: string }): Promise<void>;
@@ -283,6 +286,22 @@ export function createPgRepos(pool: pg.Pool): Repos {
           if (failed.length) throw new VersionConflict(failed);
           return failed;
         }).catch(conflictKeys);
+      },
+      async saveCategory(c) {
+        const f = [c.id, c.short, c.name, c.group, c.oeeBucket, c.infoOnly, c.color, c.aliases, c.details, c.notes];
+        if (c.version === null) {
+          const r = await q.query(
+            `INSERT INTO md_stop_category (id, short_name, name, loss_group, oee_bucket, info_only, color, aliases, details, notes, sort_order)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9::text[],$10,(SELECT COALESCE(MAX(sort_order), -1) + 1 FROM md_stop_category)) ON CONFLICT (id) DO NOTHING`, f);
+          return r.rowCount === 1;
+        }
+        const r = await q.query(
+          `UPDATE md_stop_category SET short_name=$2, name=$3, loss_group=$4, oee_bucket=$5, info_only=$6, color=$7, aliases=$8::text[], details=$9::text[], notes=$10, version=version+1
+           WHERE id=$1 AND version=$11`, [...f, c.version]);
+        return r.rowCount === 1;
+      },
+      async deleteCategory(id, version) {
+        return (await q.query('DELETE FROM md_stop_category WHERE id=$1 AND version=$2', [id, version])).rowCount === 1;
       },
     },
     kiosks: {

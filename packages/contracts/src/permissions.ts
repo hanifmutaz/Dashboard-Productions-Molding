@@ -12,6 +12,7 @@ export const PERMISSIONS = {
   exportSales: 'export.sales',
   viewMasterData: 'masterdata.view',
   editMasterData: 'masterdata.edit',
+  editStopCategories: 'masterdata.stopcategories.edit',
   viewSettings: 'settings.view',
   editSettings: 'settings.edit',
   manageUsers: 'admin.users.manage',
@@ -35,6 +36,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'export.sales': 'Export Sales',
   'masterdata.view': 'Lihat Master Data',
   'masterdata.edit': 'Edit Master Data',
+  'masterdata.stopcategories.edit': 'Edit Stop categories & details',
   'settings.view': 'Lihat Settings',
   'settings.edit': 'Edit Settings',
   'admin.users.manage': 'Kelola user',
@@ -44,7 +46,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
 };
 
 const ALL_USERS: Permission[] = [PERMISSIONS.viewProduction, PERMISSIONS.viewUtilization, PERMISSIONS.viewStopTime, PERMISSIONS.viewMachineDetail, PERMISSIONS.viewSettings];
-/** Default matrix (STATE §8). Super admin is the only role with role/permission, settings edit and audit. */
+/** Default matrix (STATE §8). Super admin is the only role with role/permission, settings edit, audit and stop-category edit;
+ *  stop-category edit can be granted to any custom role from Admin ▸ Roles & permissions. */
 export const DEFAULT_ROLE_PERMISSIONS = {
   superAdmin: ALL_PERMISSIONS,
   admin: [

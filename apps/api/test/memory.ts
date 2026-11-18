@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_ROLE_PERMISSIONS, DEFAULT_SETTINGS } from '@mpd/contracts';
+import { DEFAULT_ROLE_PERMISSIONS, DEFAULT_SETTINGS, type StopCategory } from '@mpd/contracts';
 import type { Repos, RoleRow, SessionRow, UserRow } from '../src/db/repos.js';
 import type { ConmasSource } from '../src/modules/conmas/source.js';
 import { SourceUnavailable } from '../src/modules/conmas/source.js';
@@ -17,6 +17,10 @@ export async function memoryRepos() {
   const users = [mk('root', roles[0]!), mk('admin1', roles[1]!), mk('viewer', roles[2]!)];
   const sessions = new Map<string, SessionRow>();
   const audit: { action: string; result: string }[] = [];
+  const cats: StopCategory[] = [
+    { id: 'abn', short: 'Handling abnormality', name: 'Handling abnormality issue', group: 'breakdown', oeeBucket: 'A', infoOnly: false, color: 's-paint-6366f1', aliases: ['Handling abnormality issue'], details: ['Analisa'], notes: null, version: 0 },
+    { id: 'pm', short: 'PM loss', name: 'PM loss', group: 'planned', oeeBucket: 'A', infoOnly: false, color: 's-paint-475569', aliases: ['PM loss'], details: ['PM Injection'], notes: null, version: 0 },
+  ];
   let settings = { body: DEFAULT_SETTINGS, version: 0, updatedAt: new Date().toISOString(), updatedBy: null as string | null };
   const repos: Repos = {
     users: {
@@ -49,7 +53,16 @@ export async function memoryRepos() {
       init: () => Promise.resolve(),
     },
     prefs: { get: () => Promise.resolve(null), put: () => Promise.resolve() },
-    master: { parts: () => Promise.resolve([]), materials: () => Promise.resolve([]), categories: () => Promise.resolve([]), upsertPartPrices: () => Promise.resolve([]), upsertMaterials: () => Promise.resolve([]) },
+    master: { parts: () => Promise.resolve([]), materials: () => Promise.resolve([]), categories: () => Promise.resolve(cats.map((c) => ({ ...c }))), upsertPartPrices: () => Promise.resolve([]), upsertMaterials: () => Promise.resolve([]),
+      saveCategory: (c) => {
+        const i = cats.findIndex((x) => x.id === c.id);
+        if (c.version === null) { if (i >= 0) return Promise.resolve(false); cats.push({ ...c, version: 0 }); return Promise.resolve(true); }
+        if (i < 0 || cats[i]!.version !== c.version) return Promise.resolve(false);
+        cats[i] = { ...c, version: c.version + 1 };
+        return Promise.resolve(true);
+      },
+      deleteCategory: (id, v) => { const i = cats.findIndex((x) => x.id === id && x.version === v); if (i < 0) return Promise.resolve(false); cats.splice(i, 1); return Promise.resolve(true); },
+    },
     kiosks: { createPairing: () => Promise.resolve(), redeem: () => Promise.resolve(null), byTokenHash: () => Promise.resolve(null), list: () => Promise.resolve([]), revoke: () => Promise.resolve(true), touch: () => Promise.resolve() },
     ping: () => Promise.resolve(),
   };

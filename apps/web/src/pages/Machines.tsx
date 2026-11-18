@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import type { MachineListView, MachineSummary, ViewDataEnvelope } from '@mpd/contracts';
+import type { MachineListView, MachineSummary, Settings, ViewDataEnvelope } from '@mpd/contracts';
 import { api, qs } from '../lib/api';
 import { useReportSource } from '../lib/filters';
 import { useSession } from '../lib/session';
@@ -58,6 +58,35 @@ function Card({ m, onOpen }: { m: MachineSummary; onOpen: () => void }) {
   );
 }
 
+type Status = 'all' | 'ok' | 'mid' | 'lo' | 'none';
+type Sort = 'mc' | 'low' | 'high' | 'oee' | 'stop' | 'reject';
+const SORTS: { id: Sort; label: string }[] = [
+  { id: 'mc', label: 'MC no.' }, { id: 'low', label: 'Lowest first' }, { id: 'high', label: 'Highest first' },
+  { id: 'oee', label: 'Lowest OEE' }, { id: 'stop', label: 'Most stop time' }, { id: 'reject', label: 'Most reject' },
+];
+const KEY = 'mpd.machines.filters';
+/** Filters survive opening a machine and coming back (same browser tab only). */
+function loadFilters(): { q: string; status: Status; sort: Sort | null } {
+  try {
+    const o = JSON.parse(sessionStorage.getItem(KEY) ?? '{}') as Partial<{ q: string; status: Status; sort: Sort }>;
+    return { q: typeof o.q === 'string' ? o.q : '', status: (['all', 'ok', 'mid', 'lo', 'none'] as const).includes(o.status as Status) ? o.status! : 'all', sort: SORTS.some((x) => x.id === o.sort) ? o.sort! : null };
+  } catch { return { q: '', status: 'all', sort: null }; }
+}
+const statusOf = (m: MachineSummary, s: Settings): Exclude<Status, 'all'> => {
+  if (!m.hasRecord || m.bekidoritsu.value === null) return 'none';
+  const c = cls(m.bekidoritsu.value, 'beki', s);
+  return c === 'ok' || c === 'mid' || c === 'lo' ? c : 'none';
+};
+const BIG = 1e9;
+const SORT_FN: Record<Sort, (a: MachineSummary, b: MachineSummary) => number> = {
+  mc: () => 0,
+  low: (a, b) => (a.bekidoritsu.value ?? BIG) - (b.bekidoritsu.value ?? BIG),
+  high: (a, b) => (b.bekidoritsu.value ?? -1) - (a.bekidoritsu.value ?? -1),
+  oee: (a, b) => (a.oee.value ?? BIG) - (b.oee.value ?? BIG),
+  stop: (a, b) => (b.stopMinutes ?? -1) - (a.stopMinutes ?? -1),
+  reject: (a, b) => (b.reject ?? -1) - (a.reject ?? -1),
+};
+
 export function MachineListPage() {
   const { settings: s } = useSession();
   const nav = useNavigate();
@@ -65,14 +94,24 @@ export function MachineListPage() {
   const date = sp.get('date');
   const q = useMachineList(date);
   useReportSource(q.data, q.isPending, q.isError);
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<'mc' | 'low'>(s.md.sort);
-  useEffect(() => setSort(s.md.sort), [s.md.sort]);
+  const [init] = useState(loadFilters);
+  const [search, setSearch] = useState(init.q);
+  const [status, setStatus] = useState<Status>(init.status);
+  const [sort, setSort] = useState<Sort>(init.sort ?? s.md.sort);
+  // The Settings default only applies until the user picks a sort themselves.
+  const [picked, setPicked] = useState(init.sort !== null);
+  useEffect(() => { if (!picked) setSort(s.md.sort); }, [s.md.sort, picked]);
+  useEffect(() => { try { sessionStorage.setItem(KEY, JSON.stringify({ q: search, status, sort: picked ? sort : null })); } catch { /* storage unavailable: filters just reset */ } }, [search, status, sort, picked]);
   const v = q.data?.data ?? null;
-  const run = v?.machines.filter((m) => m.hasRecord) ?? [];
+  const all = v?.machines ?? [];
+  const run = all.filter((m) => m.hasRecord);
   const below = run.filter((m) => cls(m.bekidoritsu.value, 'beki', s) !== 'ok');
-  let list = (v?.machines ?? []).filter((m) => !search || `mc ${m.machineNo} mc${m.machineNo} ${m.productName ?? ''} ${m.dpNo ?? ''}`.toLowerCase().includes(search.toLowerCase()));
-  if (sort === 'low') list = [...list].sort((a, b) => (a.bekidoritsu.value ?? 1e3) - (b.bekidoritsu.value ?? 1e3));
+  const count = (st: Status) => (st === 'all' ? all.length : all.filter((m) => statusOf(m, s) === st).length);
+  const text = search.trim().toLowerCase();
+  let list = all.filter((m) => (status === 'all' || statusOf(m, s) === status) && (!text || `mc ${m.machineNo} mc${m.machineNo} ${m.productName ?? ''} ${m.dpNo ?? ''}`.toLowerCase().includes(text)));
+  if (sort !== 'mc') list = [...list].sort(SORT_FN[sort]);
+  const filtered = status !== 'all' || !!text;
+  const reset = () => { setSearch(''); setStatus('all'); };
   const setDate = (d: string) => setSp({ date: d });
   return (
     <section className="view on">
@@ -88,10 +127,19 @@ export function MachineListPage() {
                   <b className="mono">{DOW[pd(v.date).getUTCDay()]} {lblY(v.date)}</b>
                   <button className="btn" type="button" aria-label="Next day" disabled={!v.nextDate} onClick={() => v.nextDate && setDate(v.nextDate)}>›</button>
                 </span>
-                <input className="srch" placeholder="Search MC or part…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 'var(--s-size-190)', margin: 0 }} aria-label="Search machine" />
-                <Seg value={sort} onChange={setSort} items={[{ id: 'mc', label: 'MC no.' }, { id: 'low', label: 'Lowest first' }]} />
               </span>
+            </div>
+            <div className="mdfilter" role="search">
+              <input className="srch" placeholder="Search MC or part…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search machine" />
+              <span className="mdstatus"><Seg value={status} onChange={setStatus} items={[
+                { id: 'all', label: `All ${count('all')}` }, { id: 'ok', label: `On target ${count('ok')}` }, { id: 'mid', label: `Below ${count('mid')}` },
+                { id: 'lo', label: `Far below ${count('lo')}` }, { id: 'none', label: `No data ${count('none')}` },
+              ]} /></span>
+              <label className="mdsort"><span>Sort</span>
+                <select value={sort} aria-label="Sort machines" onChange={(e) => { setPicked(true); setSort(e.target.value as Sort); }}>{SORTS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</select></label>
+              {filtered && <button className="btn" type="button" onClick={reset}>Reset</button>}
             </div></div>
+            {filtered && <div className="mdcount" role="status">Showing <b>{list.length}</b> of {all.length} machines</div>}
             <div className="mdgrid">
               {list.length ? list.map((m) => <Card key={m.machineNo} m={m} onOpen={() => void nav(`/machines/${encodeURIComponent(m.machineNo)}?${qs({ date: v.date })}`)} />) : <div className="card empty">No machine matches</div>}
             </div>

@@ -4,7 +4,7 @@ import { metric, type Metric } from '@mpd/contracts';
  * Owner 2026-11-17: OEE / Availability / Performance are NOT computed here; they are read from ConMas (see aggregateRate)
  * and hourly output = sum of the five QTY PCS slots per hour block.
  * Sales: APPROVED owner 2026-11-18 (Q-009 selesai untuk Sales). Scrap: sumber gram dari ConMas dikonfirmasi owner 2026-11-18, rumus
- * scrap value & ratio masih menunggu approver Quality/Finance (PROPOSED) dan belum dipakai oleh route mana pun. */
+ * scrap value & ratio masih menunggu approver Quality/Finance (PROPOSED); dipakai oleh /v1/monitoring/scrap (buildScrap) dengan label PROPOSED di UI. */
 
 export const NOT_APPROVED = 'Rumus belum disetujui (Q-003)';
 

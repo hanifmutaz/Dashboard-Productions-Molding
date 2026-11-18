@@ -63,8 +63,8 @@ describe('authorization (API enforced)', () => {
     await v.agent.get('/api/v1/monitoring/scrap').expect(403);
     const sales = await a.agent.get('/api/v1/monitoring/sales?from=2026-11-01&to=2026-11-03').expect(200);
     expect(typeof (sales.body as { state: string }).state).toBe('string');
-    const scrap = await a.agent.get('/api/v1/monitoring/scrap').expect(200);
-    expect((scrap.body as { state: string }).state).toBe('unavailable');
+    const scrap = await a.agent.get('/api/v1/monitoring/scrap?from=2026-11-01&to=2026-11-03').expect(200);
+    expect((scrap.body as { state: string; data: unknown }).data).toBeNull(); // ConMas down -> no numbers, never zeros
   });
   it('only super admin edits settings; stale version -> 409', async () => {
     const a = await login('admin1');
@@ -98,5 +98,47 @@ describe('source failure is not shown as zero', () => {
   it('error responses do not leak internals', async () => {
     const r = await request(app).get('/api/nope').expect(404);
     expect(JSON.stringify(r.body)).not.toMatch(/stack|node_modules|SELECT/i);
+  });
+});
+
+describe('stop categories & details editing (dedicated permission)', () => {
+  const body = (o: Record<string, unknown> = {}) => ({
+    id: null, short: 'Cek visual', name: 'Cek visual', group: 'quality', oeeBucket: 'A', infoOnly: false, color: 's-paint-c026d3',
+    aliases: ['Cek visual'], details: ['Waiting QC', 'waiting qc', 'Cek 100%'], notes: null, version: null, ...o,
+  });
+  const put = (a: Awaited<ReturnType<typeof login>>, b: unknown) => a.agent.put('/api/master-data/stop-categories').set('Origin', ORIGIN).set('X-CSRF-Token', a.csrf).send(b as object);
+
+  it('is denied by default for admin and user, allowed for super admin', async () => {
+    await put(await login('viewer'), body()).expect(403);
+    await put(await login('admin1'), body()).expect(403);
+    await put(await login('root'), body()).expect(200);
+  });
+  it('can be granted to a specific role', async () => {
+    ctx.roles[1]!.permissions.push('masterdata.stopcategories.edit');
+    await put(await login('admin1'), body()).expect(200);
+  });
+  it('creates with a generated id, trims duplicate details and appends to the list', async () => {
+    const r = await put(await login('root'), body()).expect(200);
+    const list = r.body as { id: string; details: string[] }[];
+    const c = list.find((x) => x.id === 'cek-visual')!;
+    expect(c.details).toEqual(['Waiting QC', 'Cek 100%']);
+    expect(ctx.audit).toContainEqual({ action: 'masterdata.stop-category.create', result: 'success' });
+  });
+  it('updates details with the version check and rejects a stale version with 409', async () => {
+    const a = await login('root');
+    await put(a, body({ id: 'pm', version: 0, short: 'PM loss', name: 'PM loss', aliases: ['PM loss'], details: ['PM Injection', 'PM Mold'] })).expect(200);
+    const stale = await put(a, body({ id: 'pm', version: 0, short: 'PM loss', name: 'PM loss', aliases: ['PM loss'], details: ['x'] })).expect(409);
+    expect((stale.body as { error: { code: string } }).error.code).toBe('CONFLICT');
+  });
+  it('rejects a name/alias already owned by another category', async () => {
+    const r = await put(await login('root'), body({ aliases: ['pm  LOSS'] })).expect(409);
+    expect((r.body as { error: { code: string } }).error.code).toBe('CATEGORY_NAME_CONFLICT');
+  });
+  it('rejects an invalid colour/group and deletes with the version', async () => {
+    const a = await login('root');
+    await put(a, body({ color: 'red' })).expect(400);
+    await put(a, body({ group: 'unmapped' })).expect(400);
+    await a.agent.delete('/api/master-data/stop-categories/pm?version=0').set('Origin', ORIGIN).set('X-CSRF-Token', a.csrf).expect(200);
+    await a.agent.delete('/api/master-data/stop-categories/pm?version=0').set('Origin', ORIGIN).set('X-CSRF-Token', a.csrf).expect(404);
   });
 });

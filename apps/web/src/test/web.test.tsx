@@ -7,7 +7,7 @@ import { m } from '@mpd/test-utils';
 import { Pc, cls, delta } from '../lib/status';
 import { fmt, f1 } from '../lib/format';
 import { presetRange, productionToday } from '../lib/period';
-import { csvRows, parseNum } from '../pages/MasterData';
+import { csvRows, parseMaterialRow, parseNum, type MatRow, type Row } from '../pages/MasterData';
 import { DataTable } from '../components/table';
 import { ApiFailure, api, setCsrf } from '../lib/api';
 
@@ -88,5 +88,38 @@ describe('API client: CSRF token basi', () => {
     setCsrf('lama');
     await expect(api.put('http://localhost/api/save', {})).resolves.toEqual({ ok: true });
     expect(calls).toBe(2);
+  });
+});
+
+describe('material CSV without DP Part', () => {
+  const csv = '\uFEFFNo,DP Part,Part Name,DP Material,Material Name,Price material/g\r\n'
+    + '1,,,077221-0-11 41,DSM PA-M TS250F6D-00001 NATURAL,259580.46\r\n'
+    + '4,,,073545-0-33 41,PPS Durafide 1140A6 HF2000 NATURAL,212902.3\r\n'
+    + '5,,,073545-0-33 41,PPS Durafide 1140A6 HF2000 NATURAL,212902.3\r\n'
+    + '6,,,073545-0-33 41,PPS Durafide 1140A6 HF2000 NATURAL,999\r\n';
+  const run = (rows: string[][]) => {
+    const acc: Row<MatRow>[] = [];
+    rows.forEach((r, i) => acc.push({ ...parseMaterialRow(r, acc, new Map(), new Map()), line: i + 2, raw: r }));
+    return acc;
+  };
+  it('accepts rows with an empty DP Part as material-only, merges identical repeats, flags a conflicting price', () => {
+    const all = csvRows(csv);
+    expect(all[0]![0]!.replace(/^\uFEFF/, '')).toBe('No');
+    const out = run(all.slice(1));
+    expect(out[0]).toMatchObject({ status: 'new', value: { dpNo: '', code: '077221-0-11 41', price: 259580.46 } });
+    expect(out[1]!.err).toBeUndefined();
+    expect(out[2]).toMatchObject({ status: 'unchanged' });
+    expect(out[2]!.warn).toMatch(/merged/);
+    expect(out[3]!.err).toMatch(/price conflicts with row 3/);
+  });
+  it('still requires material code/name/price and rejects one DP Part mapped to two materials', () => {
+    expect(run([['1', '', '', '', 'x', '10']])[0]!.err).toBe('DP Material is empty');
+    expect(run([['1', '', '', 'M1', 'x', '0']])[0]!.err).toBe('invalid Price material/g');
+    const two = run([['1', 'DP-1', '', 'M1', 'a', '10'], ['2', 'DP-1', '', 'M2', 'b', '11']]);
+    expect(two[1]!.err).toMatch(/already uses M1/);
+  });
+  it('warns when the price looks like per-kg (>= Rp 10.000 per gram)', () => {
+    expect(run([['1', '', '', 'M1', 'a', '259580.46']])[0]!.warn).toMatch(/per-kg/);
+    expect(run([['1', '', '', 'M1', 'a', '259.58']])[0]!.warn).toBeUndefined();
   });
 });

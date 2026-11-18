@@ -38,3 +38,16 @@ describe('Harga/PCS boleh desimal (maks 4 digit)', () => {
     expect(PartPriceUpdateSchema.safeParse(body(1.23456)).success).toBe(false);
   });
 });
+
+import { StopCategoryInputSchema } from '../src/masterData.js';
+describe('stop category editing', () => {
+  const ok = { id: null, short: 'A', name: 'A', group: 'setup', oeeBucket: 'A', infoOnly: false, color: 's-paint-64748b', aliases: [], details: [], notes: null, version: null };
+  it('super admin only by default; new and existing records need consistent id/version', () => {
+    expect(DEFAULT_ROLE_PERMISSIONS.superAdmin).toContain(PERMISSIONS.editStopCategories);
+    expect(DEFAULT_ROLE_PERMISSIONS.admin).not.toContain(PERMISSIONS.editStopCategories);
+    expect(StopCategoryInputSchema.safeParse(ok).success).toBe(true);
+    expect(StopCategoryInputSchema.safeParse({ ...ok, id: 'x' }).success).toBe(false);
+    expect(StopCategoryInputSchema.safeParse({ ...ok, id: 'x', version: 2 }).success).toBe(true);
+    expect(StopCategoryInputSchema.safeParse({ ...ok, group: 'unmapped' }).success).toBe(false);
+  });
+});
