@@ -1,11 +1,11 @@
 import {
-  SHIFT_START_HOURS, metric,
+  SHIFT_START_HOURS, metric, shiftStartsOf, type Metric,
   type DailyRatesView, type LossGroup, type MachineDetailView, type MachineListView, type MachineProduction, type MachineUtilization, type ProductionTotals, type ProductionView,
   type SettingsBody, type StopCategoryRef, type StopTimeView, type UtilizationTotals, type UtilizationView,
 } from '@mpd/contracts';
 import { machineSort, type SourceRecord } from '../conmas/source.js';
 import { GROUPS } from './categories.js';
-import { bekidoritsu, ipr, kikai, notApproved, quality, shugyo, sogo, sumNullable } from './formulas.js';
+import { aggregateRate, bekidoritsu, ipr, kikai, quality, shugyo, sogo, sumNullable } from './formulas.js';
 
 export interface Ev { date: string; shift: '1' | '2' | '3'; machineNo: string; productName: string | null; cat: StopCategoryRef; detail: string; minutes: number; startMinuteOfDay: number }
 export type Resolve = (text: string) => StopCategoryRef;
@@ -26,10 +26,10 @@ function groupBy<T, K>(a: T[], f: (x: T) => K): Map<K, T[]> {
 }
 
 /** Stop events from ConMas slots. "Informasi" / info-only categories are never counted as loss (STATE §9). */
-export function eventsOf(r: SourceRecord, resolve: Resolve): { loss: Ev[]; info: Ev[]; rejects: Map<string, number> } {
+export function eventsOf(r: SourceRecord, resolve: Resolve, starts: readonly number[] = SHIFT_START_HOURS): { loss: Ev[]; info: Ev[]; rejects: Map<string, number> } {
   const loss: Ev[] = [], info: Ev[] = [];
   const rejects = new Map<string, number>();
-  const shiftStart = SHIFT_START_HOURS[Number(r.shift) - 1]!;
+  const shiftStart = starts[Number(r.shift) - 1]!;
   for (const s of r.slots) {
     if (s.reject && s.rejectQty && s.rejectQty > 0) rejects.set(s.reject, (rejects.get(s.reject) ?? 0) + s.rejectQty);
     if (!s.category) continue;
@@ -104,6 +104,11 @@ export function filterMachines(records: SourceRecord[], f: { status?: 'attention
 }
 
 // ---------------- Utilization ----------------
+/** OEE / Availability / Performance as published by ConMas (owner 2026-11-17), planned-minutes weighted. */
+function conmasRates(rs: SourceRecord[]): { oee: Metric; availability: Metric; performance: Metric } {
+  const of = (pick: (r: SourceRecord) => number | null, label: string) => aggregateRate(rs.map((r) => ({ value: pick(r), weight: r.plannedMinutes })), label);
+  return { oee: of((r) => r.oee, 'OEE'), availability: of((r) => r.availability, 'Availability'), performance: of((r) => r.performance, 'Performance') };
+}
 function utilTotals(rs: SourceRecord[], machineCount: number, days: number, calPer: number, resolve: Resolve): UtilizationTotals {
   const planned = sum(rs, (r) => r.plannedMinutes ?? 0);
   const stop = sum(rs, (r) => sum(eventsOf(r, resolve).loss, (e) => e.minutes));
@@ -112,7 +117,7 @@ function utilTotals(rs: SourceRecord[], machineCount: number, days: number, calP
   return {
     kikai: kikai(planned, stop), sogo: sogo(planned, stop, calendar), shugyo: shugyo(planned, calendar),
     quality: quality(actual, sumNullable(rs.map((r) => r.gross))), bekidoritsu: bekidoritsu(actual, plan),
-    availability: notApproved(), performance: notApproved(), oee: notApproved(),
+    ...conmasRates(rs),
     plannedMinutes: planned, stopMinutes: stop, calendarMinutes: calendar,
   };
 }
@@ -205,18 +210,37 @@ export function buildMachineList(records: SourceRecord[], known: string[], date:
     date, prevDate: adj.prev, nextDate: adj.next,
     machines: all.map((machineNo) => {
       const list = records.filter((r) => r.machineNo === machineNo);
-      if (!list.length) return { machineNo, dpNo: null, productName: null, hasRecord: false, bekidoritsu: metric(null, 'Tidak ada catatan produksi'), oee: notApproved(), stopMinutes: null, reject: null };
+      if (!list.length) return { machineNo, dpNo: null, productName: null, hasRecord: false, bekidoritsu: metric(null, 'Tidak ada catatan produksi'), oee: metric(null, 'Tidak ada catatan produksi'), stopMinutes: null, reject: null };
       const t = prodTotals(list, resolve);
-      return { machineNo, dpNo: list[0]!.dpNo, productName: list[0]!.productName, hasRecord: true, bekidoritsu: t.bekidoritsu, oee: notApproved(), stopMinutes: t.stopMinutes, reject: t.reject };
+      return { machineNo, dpNo: list[0]!.dpNo, productName: list[0]!.productName, hasRecord: true, bekidoritsu: t.bekidoritsu, oee: conmasRates(list).oee, stopMinutes: t.stopMinutes, reject: t.reject };
     }),
   };
 }
 
-export function buildMachineDetail(machineNo: string, date: string, records: SourceRecord[], adj: { prev: string | null; next: string | null }, resolve: Resolve): MachineDetailView {
+/** Hourly output: sum of the five QTY PCS slots per hour block (APPROVED 2026-11-17). Hours are ordered from the start of shift 1; no hourly plan exists in the source. */
+export function hourlyOutput(rs: SourceRecord[], starts: readonly number[]): MachineDetailView['hourly'] {
+  const byHour = new Map<number, number>();
+  for (const r of rs) {
+    const blocks = new Map<number, { hour: number; qty: number | null }>();
+    for (const s of r.slots) {
+      const b = blocks.get(s.block) ?? { hour: s.startHour ?? (starts[Number(r.shift) - 1]! + s.block) % 24, qty: null };
+      if (s.qty !== null) b.qty = (b.qty ?? 0) + s.qty;
+      blocks.set(s.block, b);
+    }
+    for (const b of blocks.values()) if (b.qty !== null) byHour.set(b.hour, (byHour.get(b.hour) ?? 0) + b.qty);
+  }
+  if (!byHour.size) return { available: false, reason: 'Belum ada QTY PCS per jam yang tercatat di ConMas pada hari ini.' };
+  const origin = starts[0]!;
+  return { available: true, hours: [...byHour.entries()].sort((a, b) => ((a[0] - origin + 24) % 24) - ((b[0] - origin + 24) % 24)).map(([hour, actual]) => ({ hour, plan: null, actual })) };
+}
+
+export function buildMachineDetail(machineNo: string, date: string, records: SourceRecord[], adj: { prev: string | null; next: string | null }, resolve: Resolve, s: SettingsBody): MachineDetailView {
   const rs = records.filter((r) => r.machineNo === machineNo && r.date === date);
-  const shiftTime = (i: number) => `${pad(SHIFT_START_HOURS[i]!)}:00–${pad(SHIFT_START_HOURS[(i + 1) % 3]!)}:00`;
-  const allEv = rs.map((r) => ({ r, e: eventsOf(r, resolve) }));
-  const stops = allEv.flatMap(({ e }) => e.loss).sort((a, b) => Number(a.shift) - Number(b.shift) || ((a.startMinuteOfDay - 360 + 1440) % 1440) - ((b.startMinuteOfDay - 360 + 1440) % 1440));
+  const starts = shiftStartsOf(s);
+  const shiftTime = (i: number) => `${pad(starts[i]!)}:00–${pad(starts[(i + 1) % 3]!)}:00`;
+  const allEv = rs.map((r) => ({ r, e: eventsOf(r, resolve, starts) }));
+  const dayMin = (m: number) => (m - starts[0] * 60 + 1440) % 1440;
+  const stops = allEv.flatMap(({ e }) => e.loss).sort((a, b) => Number(a.shift) - Number(b.shift) || dayMin(a.startMinuteOfDay) - dayMin(b.startMinuteOfDay));
   const shifts = (['1', '2', '3'] as const).map((shift, i) => {
     const r = rs.find((x) => x.shift === shift);
     if (!r) return { shift, time: shiftTime(i), hasRecord: false, group: null, plan: null, actual: null, gross: null, reject: null, ipr: metric(null, 'Tidak ada record'), deviation: null, stopMinutes: null, bekidoritsu: metric(null, 'Tidak ada record') };
@@ -249,10 +273,10 @@ export function buildMachineDetail(machineNo: string, date: string, records: Sou
       { role: 'technician', nik: latest?.personnel.technician ?? null }, { role: 'operator', nik: latest?.personnel.operator ?? null },
     ],
     shifts,
-    totals: { plan: t.plan, actual: t.actual, gross: t.gross, reject: t.reject, deviation: t.deviation, ipr: t.ipr, stopMinutes: t.stopMinutes, bekidoritsu: t.bekidoritsu, oee: notApproved() },
+    totals: { plan: t.plan, actual: t.actual, gross: t.gross, reject: t.reject, deviation: t.deviation, ipr: t.ipr, stopMinutes: t.stopMinutes, bekidoritsu: t.bekidoritsu, oee: conmasRates(rs).oee },
     stops: stops.map((e) => ({ shift: e.shift, startMinuteOfDay: e.startMinuteOfDay, time: `${pad(Math.floor(e.startMinuteOfDay / 60))}:00`, minutes: e.minutes, categoryId: e.cat.id, category: e.cat.short, color: e.cat.color, detail: e.detail })),
     stopCategories: [...catMap.values()].sort((a, b) => b.minutes - a.minutes),
-    hourly: { available: false, reason: 'Agregasi output per jam (5 slot QTY PCS) belum disetujui; mockup memakai estimasi yang tidak dipakai di produksi.' },
+    hourly: hourlyOutput(rs, starts),
     rejectPareto: pareto,
   };
 }

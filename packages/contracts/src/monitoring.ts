@@ -47,7 +47,7 @@ export interface UtilizationTotals {
   /** Approved: good / gross * 100 */
   quality: Metric;
   bekidoritsu: Metric;
-  /** Not approved (Q-003): always unavailable until approved. */
+  /** Taken from ConMas (owner 2026-11-17), aggregated as a planned-minutes weighted mean. Unavailable when ConMas has no value. */
   availability: Metric;
   performance: Metric;
   oee: Metric;

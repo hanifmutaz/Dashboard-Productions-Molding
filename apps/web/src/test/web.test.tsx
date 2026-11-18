@@ -34,6 +34,7 @@ describe('display helpers (no business formulas)', () => {
   it('production date: shift 3 after midnight belongs to the start date', () => {
     expect(productionToday(new Date('2026-11-09T23:30:00Z'))).toBe('2026-11-10'); // 06:30 WIB
     expect(productionToday(new Date('2026-11-09T22:30:00Z'))).toBe('2026-11-09'); // 05:30 WIB, shift 3 of 11-09
+    expect(productionToday(new Date('2026-11-09T23:30:00Z'), 7)).toBe('2026-11-09'); // 06:30 WIB, shift 1 now starts at 07:00
     expect(presetRange('l7', '2026-11-09')).toEqual({ from: '2026-11-03', to: '2026-11-09' });
   });
 });

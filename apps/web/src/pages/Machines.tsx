@@ -43,7 +43,7 @@ function Card({ m, onOpen }: { m: MachineSummary; onOpen: () => void }) {
         <div className="h"><b>MC {m.machineNo}</b><span className="chip">{m.hasRecord ? 'Plan = 0' : 'No data'}</span></div>
         <div className="p">{m.productName ?? '—'}</div>
         <div className="gw"><Gauge v={0} tg={tg} col="" /><div className="gv"><span className="fa">—</span><small>{m.hasRecord ? m.bekidoritsu.reason : 'Tidak ada catatan produksi'}</small></div></div>
-        <div className="mf"><div><span>OEE</span>—</div><div><span>Stop</span>{m.stopMinutes == null ? '—' : <b>{fmt(m.stopMinutes)}<i> min</i></b>}</div><div><span>Reject</span>{fmt(m.reject)}</div></div>
+        <div className="mf"><div><span>OEE</span>{m.oee.value === null ? '—' : <b>{f1(m.oee.value)}<i>%</i></b>}</div><div><span>Stop</span>{m.stopMinutes == null ? '—' : <b>{fmt(m.stopMinutes)}<i> min</i></b>}</div><div><span>Reject</span>{fmt(m.reject)}</div></div>
       </button>
     );
   }
@@ -53,7 +53,7 @@ function Card({ m, onOpen }: { m: MachineSummary; onOpen: () => void }) {
       <div className="h"><b>MC {m.machineNo}</b><span className={`chip ${c === 'ok' ? 'good' : c === 'mid' ? 'warn' : 'bad'}`}>{c === 'ok' ? 'On target' : c === 'mid' ? 'Below' : 'Far below'} · {(b - tg >= 0 ? '+' : '−') + f1(Math.abs(b - tg))} pt</span></div>
       <div className="p">{m.productName}</div>
       <div className="gw"><Gauge v={b} tg={tg} col={col} /><div className="gv"><span style={{ color: col }}>{f1(b)}<i>%</i></span><small>Bekidoritsu</small></div></div>
-      <div className="mf"><div><span>OEE</span><b title={m.oee.reason ?? undefined}>—</b></div><div><span>Stop</span><b>{fmt(m.stopMinutes)}<i> min</i></b></div><div><span>Reject</span><b>{fmt(m.reject)}</b></div></div>
+      <div className="mf"><div><span>OEE</span><b title={m.oee.reason ?? undefined}>{m.oee.value === null ? '—' : <>{f1(m.oee.value)}<i>%</i></>}</b></div><div><span>Stop</span><b>{fmt(m.stopMinutes)}<i> min</i></b></div><div><span>Reject</span><b>{fmt(m.reject)}</b></div></div>
     </button>
   );
 }

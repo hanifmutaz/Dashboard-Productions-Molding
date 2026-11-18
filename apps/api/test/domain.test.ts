@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { bekidoritsu, ipr, kikai, quality, shugyo, sogo } from '../src/modules/metrics/formulas.js';
+import { aggregateRate, bekidoritsu, ipr, kikai, quality, shugyo, sogo } from '../src/modules/metrics/formulas.js';
 import { applyFreshness, currentProductionDate } from '../src/modules/metrics/freshness.js';
-import { normalizeRow, parseHourLabel, selectLatest, toIsoWithOffset, type SourceRecord } from '../src/modules/conmas/source.js';
+import { normalizeRow, parseHourLabel, parseRate, selectLatest, toIsoWithOffset, type SourceRecord } from '../src/modules/conmas/source.js';
 import { HEADER_COLUMNS, HOUR_BLOCKS } from '../src/modules/conmas/fieldMap.generated.js';
-import { buildProduction, eventsOf } from '../src/modules/metrics/views.js';
+import { buildMachineDetail, buildMachineList, buildUtilization, buildProduction, eventsOf, hourlyOutput } from '../src/modules/metrics/views.js';
 import { categoryResolver } from '../src/modules/metrics/categories.js';
-import { DEFAULT_SETTINGS, type StopCategory } from '@mpd/contracts';
+import { DEFAULT_SETTINGS, SettingsBodySchema, type StopCategory } from '@mpd/contracts';
 
 const cfg = { view: 'v', tzOffset: '+07:00', cacheTtlSeconds: 0, cols: { recordId: 'rid', revNo: 'rev', deleted: 'del', updatedAt: 'upd' } };
 
@@ -95,7 +95,7 @@ describe('production view', () => {
   it('aggregates without inventing values; achievement uses approved bekidoritsu', () => {
     const r = (mc: string, plan: number, actual: number): SourceRecord => ({
       recordId: mc, date: '2026-11-03', machineNo: mc, shift: '1', group: 'A', cavity: null, plan, actual, gross: null, ngQty: null, dpNo: null, productName: 'P', poNo: null,
-      ctActual: null, plannedMinutes: 480, personnel: { leader: null, cell: null, technician: null, operator: null }, updatedAt: null, slots: [],
+      ctActual: null, plannedMinutes: 480, oee: null, availability: null, performance: null, personnel: { leader: null, cell: null, technician: null, operator: null }, updatedAt: null, slots: [],
     });
     const { resolve } = categoryResolver([]);
     const v = buildProduction([r('1', 100, 50), r('2', 0, 0)], null, { from: '2026-11-03', to: '2026-11-03', shift: null, days: 1 }, DEFAULT_SETTINGS, resolve);
@@ -103,5 +103,103 @@ describe('production view', () => {
     expect(v.totals.gross).toBeNull();
     expect(v.machines.find((m) => m.machineNo === '2')!.achievement).toBe('unknown');
     expect(v.machines.find((m) => m.machineNo === '1')!.achievement).toBe('attention');
+  });
+});
+
+// ---------- owner decisions 2026-11-17 ----------
+const rec = (o: Partial<SourceRecord> = {}): SourceRecord => ({
+  recordId: 'r', date: '2026-11-03', machineNo: '1', shift: '1', group: 'A', cavity: null, plan: 100, actual: 90, gross: 95, ngQty: 5, dpNo: 'DP1', productName: 'P', poNo: null,
+  ctActual: null, plannedMinutes: 480, oee: null, availability: null, performance: null,
+  personnel: { leader: null, cell: null, technician: null, operator: null }, updatedAt: null, slots: [], ...o,
+});
+const slot = (block: number, qty: number | null, startHour: number | null = 6 + block) => ({ block, startHour, qty, minutes: null, category: null, detail: null, reject: null, rejectQty: null });
+const range = { from: '2026-11-03', to: '2026-11-03', shift: null, days: 1 };
+
+describe('OEE / Availability / Performance come from ConMas', () => {
+  it('parseRate: percent as-is, fraction x100, empty/garbage -> null', () => {
+    expect(parseRate('83.5', 'percent')).toBe(83.5);
+    expect(parseRate(0.835, 'fraction')).toBeCloseTo(83.5, 5);
+    expect(parseRate('', 'percent')).toBeNull();
+    expect(parseRate('abc', 'percent')).toBeNull();
+    expect(parseRate(null, 'percent')).toBeNull();
+  });
+  it('normalizeRow reads rate columns only when configured; bad value never invalidates the row', () => {
+    const row: Record<string, unknown> = {
+      [HEADER_COLUMNS.productionDate]: '2026-11-03 00:00:00', [HEADER_COLUMNS.machineNo]: '7', [HEADER_COLUMNS.shift]: 'S1',
+      [HEADER_COLUMNS.outputPlan]: 100, [HEADER_COLUMNS.outputActual]: 90, rate_oee: '80', rate_av: 'oops', rate_pf: 0.9,
+    };
+    const base = normalizeRow(row, cfg)!;
+    expect([base.oee, base.availability, base.performance]).toEqual([null, null, null]);
+    const withRates = normalizeRow(row, { ...cfg, rates: { oee: 'rate_oee', availability: 'rate_av', performance: 'rate_pf' } })!;
+    expect([withRates.oee, withRates.availability, withRates.performance]).toEqual([80, null, 0.9]);
+    expect(normalizeRow(row, { ...cfg, rates: { oee: null, availability: null, performance: 'rate_pf' }, rateScale: 'fraction' })!.performance).toBeCloseTo(90, 5);
+  });
+  it('aggregateRate: planned-minutes weighted mean, plain mean without weights, unavailable when empty', () => {
+    expect(aggregateRate([{ value: 80, weight: 480 }, { value: 60, weight: 240 }], 'OEE').value).toBeCloseTo(73.33, 2);
+    expect(aggregateRate([{ value: 80, weight: null }, { value: 60, weight: 0 }], 'OEE').value).toBe(70);
+    expect(aggregateRate([{ value: null, weight: 480 }], 'OEE')).toEqual({ value: null, reason: 'OEE dari ConMas belum tersedia' });
+  });
+  it('utilization + machine list + machine detail expose the ConMas values', () => {
+    const { resolve } = categoryResolver([]);
+    const rs = [rec({ machineNo: '1', oee: 80, availability: 90, performance: 95 }), rec({ machineNo: '2', oee: 60, availability: 70, performance: 85 })];
+    const u = buildUtilization(rs, null, range, DEFAULT_SETTINGS, resolve);
+    expect(u.totals.oee.value).toBe(70);
+    expect(u.totals.availability.value).toBe(80);
+    expect(u.machines.find((m) => m.machineNo === '2')!.performance.value).toBe(85);
+    expect(buildUtilization([rec()], null, range, DEFAULT_SETTINGS, resolve).totals.oee.value).toBeNull();
+    const l = buildMachineList(rs, ['1', '2'], '2026-11-03', { prev: null, next: null }, resolve);
+    expect(l.machines.find((m) => m.machineNo === '1')!.oee.value).toBe(80);
+    const d = buildMachineDetail('1', '2026-11-03', rs, { prev: null, next: null }, resolve, DEFAULT_SETTINGS);
+    expect(d.totals.oee.value).toBe(80);
+  });
+});
+
+describe('hourly output = sum of the five QTY PCS slots per hour block (approved)', () => {
+  it('sums slots per block, skips blocks without qty, keeps plan null', () => {
+    const r = rec({ slots: [slot(0, 10), slot(0, 15), slot(0, null), slot(1, null), slot(2, 40)] });
+    const h = hourlyOutput([r], [6, 14, 22]);
+    expect(h).toEqual({ available: true, hours: [{ hour: 6, plan: null, actual: 25 }, { hour: 8, plan: null, actual: 40 }] });
+  });
+  it('orders hours from the start of shift 1 (night hours last) and falls back to shift start + block', () => {
+    const r1 = rec({ shift: '1', slots: [slot(0, 5)] });
+    const r3 = rec({ shift: '3', slots: [slot(0, 7, null), slot(3, 9, 1)] });
+    const h = hourlyOutput([r3, r1], [6, 14, 22]);
+    expect(h.available && h.hours.map((x) => x.hour)).toEqual([6, 22, 1]);
+  });
+  it('unavailable (with reason) when no slot has qty', () => {
+    expect(hourlyOutput([rec({ slots: [slot(0, null)] })], [6, 14, 22]).available).toBe(false);
+    expect(hourlyOutput([], [6, 14, 22]).available).toBe(false);
+  });
+  it('machine detail wires it in', () => {
+    const { resolve } = categoryResolver([]);
+    const d = buildMachineDetail('1', '2026-11-03', [rec({ slots: [slot(0, 12)] })], { prev: null, next: null }, resolve, DEFAULT_SETTINGS);
+    expect(d.hourly).toEqual({ available: true, hours: [{ hour: 6, plan: null, actual: 12 }] });
+  });
+});
+
+describe('shift hours are editable in Settings (owner 2026-11-17)', () => {
+  const resolve = categoryResolver([]).resolve;
+  it('machine detail labels and stop ordering follow settings.shifts', () => {
+    const s = { ...DEFAULT_SETTINGS, shifts: { s1: 7, s2: 15, s3: 23 } };
+    const d = buildMachineDetail('1', '2026-11-03', [rec()], { prev: null, next: null }, resolve, s);
+    expect(d.shifts.map((x) => x.time)).toEqual(['07:00–15:00', '15:00–23:00', '23:00–07:00']);
+  });
+  it('production day rolls over at the shift 1 start', () => {
+    expect(currentProductionDate(new Date('2026-11-09T06:30:00+07:00'), 420, 7)).toBe('2026-11-08');
+    expect(currentProductionDate(new Date('2026-11-09T07:00:00+07:00'), 420, 7)).toBe('2026-11-09');
+  });
+  it('validation: distinct and clockwise', () => {
+    const ok = (shifts: { s1: number; s2: number; s3: number }) => SettingsBodySchema.safeParse({ ...DEFAULT_SETTINGS, shifts }).success;
+    expect(ok({ s1: 6, s2: 14, s3: 22 })).toBe(true);
+    expect(ok({ s1: 7, s2: 15, s3: 23 })).toBe(true);
+    expect(ok({ s1: 22, s2: 6, s3: 14 })).toBe(true);
+    expect(ok({ s1: 6, s2: 6, s3: 22 })).toBe(false);
+    expect(ok({ s1: 6, s2: 22, s3: 14 })).toBe(false);
+    expect(ok({ s1: 6, s2: 14, s3: 24 })).toBe(false);
+  });
+  it('restore-test cadence defaults to weekly and is bounded', () => {
+    expect(DEFAULT_SETTINGS.backup.restoreTestDays).toBe(7);
+    expect(SettingsBodySchema.safeParse({ ...DEFAULT_SETTINGS, backup: { restoreTestDays: 0 } }).success).toBe(false);
+    expect(SettingsBodySchema.safeParse({ ...DEFAULT_SETTINGS, backup: { restoreTestDays: 14 } }).success).toBe(true);
   });
 });

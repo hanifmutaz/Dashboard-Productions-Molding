@@ -3,8 +3,10 @@ import { z } from 'zod';
 export const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal YYYY-MM-DD');
 export const ShiftSchema = z.enum(['1', '2', '3']);
 export type Shift = z.infer<typeof ShiftSchema>;
-/** FINAL: shift 1 06-14, 2 14-22, 3 22-06 (counted on the date the shift starts). */
+/** Default shift starts: shift 1 06-14, 2 14-22, 3 22-06 (counted on the date the shift starts).
+ * Owner 2026-11-17: editable in Settings (`settings.shifts`); this constant is only the default. */
 export const SHIFT_START_HOURS = [6, 14, 22] as const;
+export type ShiftStarts = readonly [number, number, number];
 export const MAX_RANGE_DAYS = 93;
 
 export const RangeQuerySchema = z

@@ -46,10 +46,14 @@ npm run verify                     # build:pkgs -> lint -> typecheck -> test -> 
 
 | Area | Alasan | Referensi |
 |---|---|---|
-| OEE, Availability, Performance | Rumus belum disetujui | Q-003 |
 | Sales, Scrap | Rumus, sumber harga, approver belum ada | Q-009 |
-| Output per jam (Machine Detail hal. 3) | Agregasi 5 slot QTY PCS masih PROPOSED | Q-027 |
 | CT plan | Tidak ada di sumber | Master Data |
+| OEE, Availability, Performance | Dibaca dari ConMas; "—" bila kolom `CONMAS_COL_OEE/AVAILABILITY/PERFORMANCE` tidak ada di view atau kosong | DEV-008 |
+| Output per jam (Machine Detail hal. 3) | Σ 5 slot QTY PCS per blok jam (disetujui); "—" bila ConMas belum punya QTY PCS | DEV-009 |
 | Semua angka ConMas | Sampai `CONMAS_COL_*` diisi (kolom sistem masuk view Senin) | Q-019/Q-020 |
 
 Rumus yang **disetujui owner 2026-11-07**: Bekidoritsu, Kikai, Sogo, Shugyo, Quality, IPR (PPM).
+
+Keputusan owner **2026-11-17**: OEE/Availability/Performance dibaca dari ConMas (tidak dihitung); output per jam = Σ 5 slot QTY PCS per blok jam;
+jam mulai shift bisa diubah di Settings (shift 1 juga menentukan pergantian tanggal produksi); mode Kiosk iPad dan rotasi Kiosk/TV disetujui;
+uji restore backup default mingguan dan bisa diubah di Settings. Detail: `docs/06-testing/deviation-log.md`.

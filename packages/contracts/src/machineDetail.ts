@@ -28,7 +28,8 @@ export interface MachineDetailView {
   totals: { plan: number; actual: number; gross: number | null; reject: number | null; deviation: number; ipr: Metric; stopMinutes: number; bekidoritsu: Metric; oee: Metric };
   stops: MachineStopEvent[];
   stopCategories: { categoryId: string; name: string; color: string; minutes: number }[];
-  /** Hourly output aggregation of the five QTY PCS slots is PROPOSED (not approved) -> unavailable. */
+  /** Hourly output = sum of the five QTY PCS slots per hour block (APPROVED by owner 2026-11-17). `plan` stays null: no hourly plan in the source.
+   * Hours are ordered from the start of shift 1. */
   hourly: { available: false; reason: string } | { available: true; hours: { hour: number; plan: number | null; actual: number }[] };
   rejectPareto: { name: string; qty: number }[];
 }

@@ -40,6 +40,7 @@ export function UtilizationPage() {
   const msg = emptyMsg(env);
   const ms = v?.machines ?? [];
   const cur = ms.find((m) => m.machineNo === sel) ?? ms[0];
+  const rk = ms.some((m) => m.oee.value !== null) ? ({ key: 'oee', label: 'OEE' } as const) : ({ key: 'kikai', label: 'Kikai Kadouritsu' } as const);
   const vs = p ? <span className="fa">vs previous {v?.range.days} days</span> : null;
   const kpiRate = (k: 'kikai' | 'sogo' | 'shugyo', label: string, desc: string) => (
     <Kpi l={label} v={f1(t![k].value)} u="%" desc={desc} title={t![k].reason ?? undefined} g={{ v: t![k].value, k }} d={<>{delta(t![k].value, p?.[k].value, 'up', true)} {vs}</>}
@@ -58,7 +59,7 @@ export function UtilizationPage() {
   const exportCsv = () => {
     downloadCsv(`molding_utilization_${f.from}_${f.to}.csv`, [
       ['Machine', 'DP Name', 'Availability %', 'Performance %', 'Quality %', 'OEE %', 'Kikai %', 'Sogo %', 'Shugyo %', 'Bekidoritsu %', 'CT actual'],
-      ...ms.map((m) => ['MC ' + m.machineNo, m.productName, '', '', f1(m.quality.value), '', f1(m.kikai.value), f1(m.sogo.value), f1(m.shugyo.value), f1(m.bekidoritsu.value), m.ctActual.value]),
+      ...ms.map((m) => ['MC ' + m.machineNo, m.productName, f1(m.availability.value), f1(m.performance.value), f1(m.quality.value), f1(m.oee.value), f1(m.kikai.value), f1(m.sogo.value), f1(m.shugyo.value), f1(m.bekidoritsu.value), m.ctActual.value]),
     ]);
     toast('Exported utilization');
   };
@@ -74,9 +75,10 @@ export function UtilizationPage() {
         <div className="deck u4">
           {q.isPending ? <SkelDeck n={4} /> : !t ? <EmptyDeck labels={['OEE', 'Kikai Kadouritsu', 'Sogo Kadouritsu', 'Shugyo Kadouritsu']} msg={msg} /> : (
             <>
-              <Kpi l="OEE" v="—" u="%" chip="Overall" title={t.oee.reason ?? undefined} desc={<span className="fa">{t.oee.reason}</span>}
+              <Kpi l="OEE" v={f1(t.oee.value)} u="%" chip="Overall" title={t.oee.reason ?? undefined} g={{ v: t.oee.value, k: 'oee' }}
+                desc={t.oee.value === null ? <span className="fa">{t.oee.reason}</span> : 'Nilai OEE dari ConMas'}
                 x={<div className="minis"><Mini label="Availability" m={t.availability} k="avail" /><Mini label="Performance" m={t.performance} k="perf" /><Mini label="Quality" m={t.quality} k="qual" /></div>}
-                d={<span className="fa">Availability & Performance menunggu persetujuan rumus</span>} />
+                d={<>{delta(t.oee.value, p?.oee.value, 'up', true)} {vs}</>} />
               {kpiRate('kikai', 'Kikai Kadouritsu', 'Running time ÷ planned time')}
               {kpiRate('sogo', 'Sogo Kadouritsu', 'Running time ÷ calendar time')}
               {kpiRate('shugyo', 'Shugyo Kadouritsu', 'Planned time ÷ calendar time')}
@@ -84,23 +86,23 @@ export function UtilizationPage() {
           )}
         </div>
         <div className="card"><div className="strip-note">
-          <span>{v ? <><span className="dot" style={{ background: 'var(--primary)' }} />{ms.length} machines in range · OEE per machine belum tersedia (Q-003)</> : msg}</span>
+          <span>{v ? <><span className="dot" style={{ background: 'var(--primary)' }} />{ms.length} machines in range · OEE, Availability &amp; Performance dari ConMas</> : msg}</span>
           <span className="mono mu" style={{ fontSize: 'var(--s-size-12)' }}><b>Kikai</b> = (Planned − Stop) ÷ Planned · <b>Sogo</b> = (Planned − Stop) ÷ Calendar · <b>Shugyo</b> = Planned ÷ Calendar</span>
         </div></div>
         <Tabs value={tab} onChange={setTab} items={[{ id: 'util-0', label: 'OEE breakdown' }, { id: 'util-1', label: 'Ranking' }, { id: 'util-2', label: 'Machine table' }]}
           right={<div className="legend"><span><i style={{ background: 'var(--bad)' }} />More than {s.band} pt below target</span><span><i style={{ background: 'var(--warn)' }} />Below target</span><span><i style={{ background: 'var(--good)' }} />At / above target</span></div>} />
         {tab === 'util-0' && (
           <div className="pane on"><div className="g2">
-            <div className="card"><div className="ch"><div><h3>OEE by machine</h3><p>Select a machine to see its losses · OEE shows “—” until the formula is approved</p></div><span className="chip">{ms.length} machines</span></div>
+            <div className="card"><div className="ch"><div><h3>OEE by machine</h3><p>Select a machine to see its losses · OEE from ConMas, shows “—” when ConMas has no value</p></div><span className="chip">{ms.length} machines</span></div>
               <div className="cb"><div className="bl scroll" style={{ maxHeight: 'var(--s-size-520)' }}>
-                <BarList max={100} kw="var(--s-size-62)" vw="var(--s-size-70)" empty={msg || 'No data'} items={ms.map((m) => ({ k: 'MC ' + m.machineNo, v: 0, l: '—', sel: m.machineNo === cur?.machineNo, onClick: () => setSel(m.machineNo),
-                  tip: { title: `MC ${m.machineNo}`, rows: [{ label: m.productName ?? '', value: '' }, { label: 'Quality', value: f1(m.quality.value) + '%' }, { label: 'Kikai', value: f1(m.kikai.value) + '%' }] } }))} />
+                <BarList max={100} kw="var(--s-size-62)" vw="var(--s-size-70)" empty={msg || 'No data'} items={ms.map((m) => ({ k: 'MC ' + m.machineNo, v: m.oee.value ?? 0, c: colOf(cls(m.oee.value, 'oee', s)), l: m.oee.value === null ? '—' : f1(m.oee.value) + '%', sel: m.machineNo === cur?.machineNo, onClick: () => setSel(m.machineNo),
+                  tip: { title: `MC ${m.machineNo}`, rows: [{ label: m.productName ?? '', value: '' }, { label: 'OEE', value: f1(m.oee.value) + '%' }, { label: 'Quality', value: f1(m.quality.value) + '%' }, { label: 'Kikai', value: f1(m.kikai.value) + '%' }] } }))} />
               </div></div>
             </div>
             <div className="card">
               {cur ? (
                 <>
-                  <div className="ch"><div><h3>MC {cur.machineNo} · OEE —</h3><p>{cur.productName} · select a factor, then click a loss to open it in Stop Time</p></div><span className="chip">Formula pending</span></div>
+                  <div className="ch"><div><h3>MC {cur.machineNo} · OEE {cur.oee.value === null ? '—' : f1(cur.oee.value) + '%'}</h3><p>{cur.productName} · select a factor, then click a loss to open it in Stop Time</p></div><span className="chip">ConMas</span></div>
                   <div className="cb">
                     {([['avail', 'Availability', cur.availability], ['perf', 'Performance', cur.performance], ['qual', 'Quality', cur.quality]] as const).map(([k, l, m]) => (
                       <button key={k} type="button" className={`br${fac === k ? ' sel' : ''}`} style={{ ['--kw' as string]: 'var(--s-size-110)', ['--vw' as string]: 'var(--s-size-60)', minHeight: 'var(--s-size-38)' }} aria-pressed={fac === k} onClick={() => setFac(k)}>
@@ -135,9 +137,9 @@ export function UtilizationPage() {
         )}
         {tab === 'util-1' && (
           <div className="pane on"><div className="g2e">
-            <div className="card"><div className="ch"><h3>Highest Kikai Kadouritsu</h3></div><div className="cb"><RankList col="var(--good)" rows={[...ms].filter((m) => m.kikai.value !== null).sort((a, b) => b.kikai.value! - a.kikai.value!).slice(0, 5).map((m) => ({ key: m.machineNo, title: `MC ${m.machineNo}`, sub: m.productName ?? '', value: f1(m.kikai.value) + '%' }))} /></div></div>
-            <div className="card"><div className="ch"><h3>Lowest Kikai Kadouritsu</h3></div><div className="cb"><RankList col="var(--bad)" rows={[...ms].filter((m) => m.kikai.value !== null).sort((a, b) => a.kikai.value! - b.kikai.value!).slice(0, 5).map((m) => ({ key: m.machineNo, title: `MC ${m.machineNo}`, sub: m.productName ?? '', value: f1(m.kikai.value) + '%' }))} /></div></div>
-          </div><div className="note" style={{ marginTop: 'var(--s-size-14)' }}>Ranking OEE ditampilkan setelah rumus OEE disetujui (Q-003). Sementara ranking memakai Kikai Kadouritsu (rumus disetujui).</div></div>
+            <div className="card"><div className="ch"><h3>Highest {rk.label}</h3></div><div className="cb"><RankList col="var(--good)" rows={[...ms].filter((m) => m[rk.key].value !== null).sort((a, b) => b[rk.key].value! - a[rk.key].value!).slice(0, 5).map((m) => ({ key: m.machineNo, title: `MC ${m.machineNo}`, sub: m.productName ?? '', value: f1(m[rk.key].value) + '%' }))} /></div></div>
+            <div className="card"><div className="ch"><h3>Lowest {rk.label}</h3></div><div className="cb"><RankList col="var(--bad)" rows={[...ms].filter((m) => m[rk.key].value !== null).sort((a, b) => a[rk.key].value! - b[rk.key].value!).slice(0, 5).map((m) => ({ key: m.machineNo, title: `MC ${m.machineNo}`, sub: m.productName ?? '', value: f1(m[rk.key].value) + '%' }))} /></div></div>
+          </div><div className="note" style={{ marginTop: 'var(--s-size-14)' }}>{rk.key === 'oee' ? 'Ranking memakai OEE dari ConMas.' : 'ConMas belum punya nilai OEE pada rentang ini, jadi ranking memakai Kikai Kadouritsu.'}</div></div>
         )}
         {tab === 'util-2' && (
           <div className="pane on"><div className="card">

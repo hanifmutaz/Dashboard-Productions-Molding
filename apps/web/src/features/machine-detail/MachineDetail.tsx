@@ -299,9 +299,7 @@ function Page3({ on, x, s, dec, MST, meter }: { on: boolean; x: MachineDetailVie
     <section className={`page p3${on ? ' on' : ''}`} inert={!on} aria-hidden={!on}>
       <div className="card chartcard">
         <div className="ttl"><span>Output per jam</span></div>
-        <div className="chart">
-          {x.hourly.available ? null : <div className="none"><span>{x.hourly.reason}</span></div>}
-        </div>
+        {x.hourly.available ? <HourlyChart hours={x.hourly.hours} /> : <div className="chart"><div className="none"><span>{x.hourly.reason}</span></div></div>}
       </div>
       <div className="p3b">
         <div className="card chartcard">
@@ -320,6 +318,41 @@ function Page3({ on, x, s, dec, MST, meter }: { on: boolean; x: MachineDetailVie
         </div>
       </div>
     </section>
+  );
+}
+
+function HourlyChart({ hours }: { hours: { hour: number; plan: number | null; actual: number }[] }) {
+  const [ref, W] = useWidth<HTMLDivElement>();
+  const [H, setH] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setH(el.clientHeight));
+    ro.observe(el);
+    setH(el.clientHeight);
+    return () => ro.disconnect();
+  }, [ref]);
+  if (W < 40 || H < 40) return <div className="chart" ref={ref} />;
+  const fs = Math.max(13, Math.round(H / 20)), m = { l: 48, r: 12, t: 24, b: 28 }, n = hours.length, iw = W - m.l - m.r, ih = H - m.t - m.b, slot = iw / n, bw = Math.min(slot * 0.62, 64);
+  const mx = Math.max(1, ...hours.map((h) => h.actual));
+  const rawStep = mx / 4, pw = 10 ** Math.floor(Math.log10(rawStep || 1)), step = Math.max(1, [1, 2, 5, 10].map((f) => f * pw).find((v) => v >= rawStep) ?? 1), ymax = Math.ceil(mx / step) * step;
+  const yb = (v: number) => m.t + ih - (v / ymax) * ih, cx = (i: number) => m.l + slot * (i + 0.5);
+  const every = Math.max(1, Math.ceil((fs * 3.4) / slot)), showVal = slot >= fs * 2.4;
+  const ticks: number[] = [];
+  for (let v = 0; v <= ymax + 1e-6; v += step) ticks.push(v);
+  return (
+    <div className="chart" ref={ref}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Output per jam">
+        {ticks.map((v) => <g key={v}><line x1={m.l} x2={W - m.r} y1={yb(v)} y2={yb(v)} stroke="var(--s-paint-e3eae9)" /><text x={m.l - 6} y={yb(v) + 4} fontSize={fs - 1} fill="var(--s-paint-8a989c)" textAnchor="end">{v}</text></g>)}
+        {hours.map((h, i) => (
+          <g key={h.hour}>
+            <rect x={cx(i) - bw / 2} y={yb(h.actual)} width={bw} height={Math.max(0, m.t + ih - yb(h.actual))} rx={4} fill="var(--s-brand-blue)"><title>{`${String(h.hour).padStart(2, '0')}:00 · ${h.actual} pcs`}</title></rect>
+            {showVal && <text x={cx(i)} y={yb(h.actual) - 6} fontSize={fs - 1} fontWeight={700} fill="var(--s-paint-1d2b30)" textAnchor="middle">{h.actual}</text>}
+            {i % every === 0 && <text x={cx(i)} y={H - 5} fontSize={fs - 1} fill="var(--s-paint-5a6a6f)" textAnchor="middle">{String(h.hour).padStart(2, '0')}:00</text>}
+          </g>
+        ))}
+      </svg>
+    </div>
   );
 }
 

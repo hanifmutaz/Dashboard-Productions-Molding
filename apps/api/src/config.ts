@@ -3,6 +3,17 @@ import { z } from 'zod';
 const bool = z.enum(['true', 'false']).transform((v) => v === 'true');
 const ident = z.string().regex(/^[a-z_][a-z0-9_]*$/i, 'Nama kolom/view tidak valid');
 const optIdent = z.union([z.literal('').transform(() => null), ident]).default('').transform((v) => v ?? null);
+/** Column name with a default candidate; set it to an empty value to switch the column off. */
+const identOrOff = (fallback: string) =>
+  z.string().optional().transform((v, ctx) => {
+    const s = v === undefined ? fallback : v.trim();
+    if (s === '') return null;
+    if (!/^[a-z_][a-z0-9_]*$/i.test(s)) {
+      ctx.addIssue({ code: 'custom', message: 'Nama kolom/view tidak valid' });
+      return z.NEVER;
+    }
+    return s;
+  });
 
 const Schema = z
   .object({
@@ -43,6 +54,12 @@ const Schema = z
     CONMAS_COL_REV_NO: optIdent,
     CONMAS_COL_DELETED: optIdent,
     CONMAS_COL_UPDATED_AT: optIdent,
+    // OEE / Availability / Performance published by ConMas (owner 2026-11-17). Candidates follow docs/03-database/conmas-mapping.md (1_39..1_41);
+    // verify the exact names/suffix against the ConMas Excel. Columns missing from the view are skipped, not fatal.
+    CONMAS_COL_OEE: identOrOff('cluster_1_39_n'),
+    CONMAS_COL_AVAILABILITY: identOrOff('cluster_1_40_n'),
+    CONMAS_COL_PERFORMANCE: identOrOff('cluster_1_41_n'),
+    CONMAS_RATE_SCALE: z.enum(['percent', 'fraction']).default('percent'),
   })
   .superRefine((c, ctx) => {
     if (c.NODE_ENV === 'production' && !c.COOKIE_SECURE && !c.ALLOW_INSECURE_COOKIE)

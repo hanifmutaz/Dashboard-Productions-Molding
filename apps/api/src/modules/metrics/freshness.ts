@@ -2,9 +2,10 @@ import type { Freshness, Notice } from '@mpd/contracts';
 import type { SourceRecord } from '../conmas/source.js';
 
 /** Production date for "now": shift 3 (22-06) belongs to the date it started (FINAL). */
-export function currentProductionDate(now: Date, tzOffsetMinutes = 420): string {
+/** The production day starts at the shift 1 start hour (default 06:00, editable in Settings since 2026-11-17). */
+export function currentProductionDate(now: Date, tzOffsetMinutes = 420, dayStartHour = 6): string {
   const local = new Date(now.getTime() + tzOffsetMinutes * 60_000);
-  if (local.getUTCHours() < 6) local.setUTCDate(local.getUTCDate() - 1);
+  if (local.getUTCHours() < dayStartHour) local.setUTCDate(local.getUTCDate() - 1);
   return local.toISOString().slice(0, 10);
 }
 
@@ -15,8 +16,8 @@ export interface FreshnessResult { freshness: Freshness; sourceUpdatedAt: string
  * beyond -> today's values are unavailable (removed, never shown as zero). Invalid timestamp -> unknown (removed).
  * Historical dates are not subject to freshness ("not-applicable").
  */
-export function applyFreshness(records: SourceRecord[], now: Date, th: { stale: number; unavailable: number }, tzOffsetMinutes = 420): FreshnessResult {
-  const today = currentProductionDate(now, tzOffsetMinutes);
+export function applyFreshness(records: SourceRecord[], now: Date, th: { stale: number; unavailable: number }, tzOffsetMinutes = 420, dayStartHour = 6): FreshnessResult {
+  const today = currentProductionDate(now, tzOffsetMinutes, dayStartHour);
   const todays = records.filter((r) => r.date === today);
   const newest = records.reduce<string | null>((m, r) => (r.updatedAt && (!m || Date.parse(r.updatedAt) > Date.parse(m)) ? r.updatedAt : m), null);
   if (!todays.length) return { freshness: 'not-applicable', sourceUpdatedAt: newest, records, notices: [] };

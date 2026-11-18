@@ -26,7 +26,7 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     try {
       const s = await settings();
       const { records, invalid, build } = await load();
-      const f = applyFreshness(records, new Date(), s.data, tzOffsetMinutes);
+      const f = applyFreshness(records, new Date(), s.data, tzOffsetMinutes, s.shifts.s1);
       const notices: Notice[] = [...f.notices];
       if (invalid) notices.push({ code: 'INVALID_ROWS', message: `${invalid} baris sumber tidak valid dan diabaikan.` });
       const state = !f.records.length ? (f.freshness === 'unavailable' || f.freshness === 'unknown' ? 'unavailable' : 'empty') : f.freshness === 'stale' ? 'stale' : 'current';
@@ -108,7 +108,8 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
 
   const DateQuery = z.object({ date: IsoDate.optional() });
   r.get('/v1/machines', requirePermission(PERMISSIONS.viewMachineDetail), async (req, res) => {
-    const { date = currentProductionDate(new Date(), tzOffsetMinutes) } = parse(DateQuery, req.query);
+    const s0 = await settings();
+    const { date = currentProductionDate(new Date(), tzOffsetMinutes, s0.shifts.s1) } = parse(DateQuery, req.query);
     const { resolve } = categoryResolver(await categories());
     res.json(await envelope(async () => {
       const [cur, adj, known] = await Promise.all([conmas.records(date, date), conmas.adjacentDates(date), conmas.machines().catch(() => [])]);
@@ -122,11 +123,12 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     if (!p) throw unauthorized();
     // Kiosk credential is locked to exactly one machine and is read-only (ADR-019).
     if (p.kind === 'kiosk' ? p.machineNo !== machineNo : !p.permissions.includes(PERMISSIONS.viewMachineDetail)) throw forbidden();
-    const { date = currentProductionDate(new Date(), tzOffsetMinutes) } = parse(DateQuery, req.query);
+    const s = await settings();
+    const { date = currentProductionDate(new Date(), tzOffsetMinutes, s.shifts.s1) } = parse(DateQuery, req.query);
     const { resolve } = categoryResolver(await categories());
     res.json(await envelope(async () => {
       const [cur, adj] = await Promise.all([conmas.records(date, date, machineNo), conmas.adjacentDates(date, machineNo)]);
-      return { records: cur.records, invalid: cur.invalidRows, build: (rs) => buildMachineDetail(machineNo, date, rs, adj, resolve) };
+      return { records: cur.records, invalid: cur.invalidRows, build: (rs) => buildMachineDetail(machineNo, date, rs, adj, resolve, s) };
     }));
   });
   return r;

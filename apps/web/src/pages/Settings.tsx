@@ -9,7 +9,8 @@ import { Toggle, useToast } from '../components/ui';
 const TGL: [keyof SettingsBody['tgt'], string][] = [['beki', 'Bekidoritsu'], ['oee', 'OEE'], ['avail', 'Availability'], ['perf', 'Performance'], ['qual', 'Quality'], ['kikai', 'Kikai Kadouritsu'], ['sogo', 'Sogo Kadouritsu'], ['shugyo', 'Shugyo Kadouritsu']];
 const KPAGES = [['prod', 'Production'], ['util', 'Machine Utilization'], ['stop', 'Stop Time'], ['sales', 'Sales'], ['scrap', 'Scrap']] as const;
 const MDPAGES = ['Ringkasan', 'Shift & stop time', 'Trend & analisa'];
-const SECTIONS = [['st-tgt', 'Targets'], ['st-rule', 'Status & colours'], ['st-cal', 'Calendar & shifts'], ['st-stop', 'Stop time display'], ['st-md', 'Machine Detail / iPad'], ['st-kiosk', 'Kiosk / TV'], ['st-data', 'Data freshness']] as const;
+const SECTIONS = [['st-tgt', 'Targets'], ['st-rule', 'Status & colours'], ['st-cal', 'Calendar & shifts'], ['st-stop', 'Stop time display'], ['st-md', 'Machine Detail / iPad'], ['st-kiosk', 'Kiosk / TV'], ['st-data', 'Data freshness'], ['st-backup', 'Backup & restore']] as const;
+const hh = (n: number) => (Number.isFinite(n) ? `${String(n).padStart(2, '0')}:00` : '--:--');
 
 const bodyOf = (s: Settings): SettingsBody => { const { version: _v, updatedAt: _u, updatedBy: _b, ...b } = s; return b; };
 
@@ -92,7 +93,12 @@ export function SettingsPage() {
                   {field('cfCD', 'Calendar min per day', 'min', (d) => d.cal.day, (d, v) => { d.cal.day = v; }, { min: 1 })}
                   {field('cfCS', 'Calendar min per shift', 'min', (d) => d.cal.shift, (d, v) => { d.cal.shift = v; }, { min: 1 })}
                 </div>
-                <div className="note" style={{ marginTop: 'var(--s-size-12)' }}><b>Shift 1</b> 06:00–14:00 · <b>Shift 2</b> 14:00–22:00 · <b>Shift 3</b> 22:00–06:00 (dihitung ke tanggal saat shift dimulai). Jam shift adalah keputusan FINAL dan tidak dapat diubah dari aplikasi.</div>
+                <div className="form f3" style={{ marginTop: 'var(--s-size-12)' }}>
+                  {field('cfS1', 'Shift 1 mulai', 'jam', (d) => d.shifts.s1, (d, v) => { d.shifts.s1 = v; }, { min: 0, max: 23, step: 1 }, 'Juga menentukan pergantian tanggal produksi')}
+                  {field('cfS2', 'Shift 2 mulai', 'jam', (d) => d.shifts.s2, (d, v) => { d.shifts.s2 = v; }, { min: 0, max: 23, step: 1 })}
+                  {field('cfS3', 'Shift 3 mulai', 'jam', (d) => d.shifts.s3, (d, v) => { d.shifts.s3 = v; }, { min: 0, max: 23, step: 1 })}
+                </div>
+                <div className="note" style={{ marginTop: 'var(--s-size-12)' }}><b>Shift 1</b> {hh(draft.shifts.s1)}–{hh(draft.shifts.s2)} · <b>Shift 2</b> {hh(draft.shifts.s2)}–{hh(draft.shifts.s3)} · <b>Shift 3</b> {hh(draft.shifts.s3)}–{hh(draft.shifts.s1)} (dihitung ke tanggal saat shift dimulai). Jam mulai harus berbeda dan berurutan shift 1 → 2 → 3. Ubah calendar min per shift bila durasi shift berubah.</div>
               </div></div>
             <div className="card" id="st-stop"><div className="ch"><div><h3>Stop time display</h3><p>Defaults for the Stop Time page</p></div></div>
               <div className="cb"><div className="form f3">
@@ -127,6 +133,10 @@ export function SettingsPage() {
                 {field('cfSt', 'Show delayed (tertunda) after', 'min', (d) => d.data.stale, (d, v) => { d.data.stale = v; }, { min: 5, max: 240 })}
                 {field('cfSu', 'Hide values (unavailable) after', 'min', (d) => d.data.unavailable, (d, v) => { d.data.unavailable = v; }, { min: 10, max: 1440 }, 'Values older than this are not shown')}
                 {field('cfRf', 'Auto refresh every', 'min', (d) => d.data.refresh, (d, v) => { d.data.refresh = v; }, { min: 1, max: 60 })}
+              </div></div></div>
+            <div className="card" id="st-backup"><div className="ch"><div><h3>Backup &amp; restore</h3><p>Jadwal uji restore backup database aplikasi (RPO 24 jam · RTO 1 hari kerja)</p></div></div>
+              <div className="cb"><div className="form">
+                {field('cfRt', 'Uji restore setiap', 'hari', (d) => d.backup.restoreTestDays, (d, v) => { d.backup.restoreTestDays = v; }, { min: 1, max: 90, step: 1 }, 'Default 7 hari (mingguan). Aplikasi tidak menjalankan restore sendiri; angka ini jadi acuan jadwal uji restore.')}
               </div></div></div>
             <div className="note">Prices, materials, stop categories and machines are maintained in <Link className="lnk" to="/master-data">Master Data</Link>. Personal preferences (default page, period, theme, sidebar, animations) are in <Link className="lnk" to="/profile">My profile</Link>.{settings.updatedBy && <> Last changed by <b>{settings.updatedBy}</b> · {new Date(settings.updatedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}.</>}</div>
             {canEdit && (

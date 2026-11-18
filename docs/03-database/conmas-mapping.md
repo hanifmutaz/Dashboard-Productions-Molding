@@ -19,7 +19,9 @@ Daftar field: **FINAL** (Excel owner). Arti domain tiap baris: **PROPOSED** samp
 | Leader / Cell / Teknisi / Operator | 1_6_t / 1_7_t / 1_24_t / 1_25_t | NIK; nama = Q-021 | PROPOSED |
 | 12 blok jam × 5 slot | JAM, QTY PCS, MENIT, KATEGORI, DETAIL, REJECT, QTY REJECT | label KATEGORI "06.00-07.00" diabaikan; jam dari label JAM | PROPOSED |
 | Stop (loss) | Σ MENIT slot dengan kategori non-info | "Informasi" tidak dihitung loss | PROPOSED |
-| OEE/AVAIL/PERF/QUALITY/BEKI ConMas | 1_39..1_43 | sample berisi 0/1 → tidak dipakai (Q-018) | REJECTED (sementara) |
+| OEE / Availability / Performance ConMas | 1_39 / 1_40 / 1_41 (kandidat, urutan OEE/AVAIL/PERF/QUALITY/BEKI; akhiran `_n` belum dikonfirmasi) | owner 2026-11-17: dipakai langsung dari ConMas. Dikonfigurasi lewat `CONMAS_COL_OEE/AVAILABILITY/PERFORMANCE`; kolom yang tidak ada di view dilewati (angka tampil "—"). Skala: `CONMAS_RATE_SCALE` (percent/fraction). Agregasi antar record: DEV-018 | PROPOSED · VERIFIKASI NAMA KOLOM & SKALA |
+| QUALITY / BEKI ConMas | 1_42 / 1_43 | tidak dipakai; Quality dan Bekidoritsu tetap memakai rumus yang sudah disetujui di backend | tidak dipakai |
+| Output per jam | Σ QTY PCS 5 slot per blok jam | owner 2026-11-17 menyetujui; plan per jam tidak ada di sumber (kosong) | APPROVED |
 | SOGO/SUGYO/KIKAI ConMas | 1_993..1_995 | tampak menit; dihitung backend | PROPOSED |
 | Kolom kategori loss 1_985..1_1014 | | sample 0 semua → tidak dipakai | PROPOSED |
 | Kolom sistem (record id, rev_no, deleted, update time) | `CONMAS_COL_*` di `.env` | belum ada di view; tanpa ini data = unavailable | BLOCKED (Senin) |

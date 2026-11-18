@@ -22,4 +22,4 @@ Lalu: `npm run db:migrate` (memakai `MIGRATE_DB_USER`) dan `npm run db:create-ad
 Aturan migrasi: file `NNN_nama.sql`, jangan ubah file yang sudah diterapkan (checksum dicek), tanpa identity column /
 partisi deklaratif / extension. UUID dibuat di Node. Jalur keluar ke PG 16/17: `pg_dump` + restore.
 
-Backup: `scripts/backup-appdb.ps1` (pg_dump harian, salinan ke share lain). RPO 24 jam, RTO 1 hari kerja. Restore test: cadence TBD (Q-014).
+Backup: `scripts/backup-appdb.ps1` (pg_dump harian, salinan ke share lain). RPO 24 jam, RTO 1 hari kerja. Restore test: default seminggu sekali (owner 2026-11-17), bisa diubah di Settings → Backup & restore (`backup.restoreTestDays`); aplikasi tidak menjalankan restore otomatis.

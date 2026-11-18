@@ -3,10 +3,14 @@ import { add, iso, lbl, lblY, pd } from './format';
 export const PRESETS = { lw_tw: 'Last week – this week', tw: 'This week', lw: 'Last week', l7: 'Last 7 days', tm: 'This month', lm: 'Last month' } as const;
 export type Preset = keyof typeof PRESETS | 'custom';
 
-/** Production date (shift 3 22:00-06:00 counts on the start date, FINAL), in plant time (UTC+7). */
-export function productionToday(now = new Date()): string {
+/** Hour at which the production day starts = shift 1 start (Settings; default 06:00). Set once from the session settings. */
+let dayStartHour = 6;
+export const setProductionDayStart = (h: number) => { dayStartHour = h; };
+
+/** Production date (the last shift counts on the date it starts), in plant time (UTC+7). */
+export function productionToday(now = new Date(), startHour = dayStartHour): string {
   const local = new Date(now.getTime() + 7 * 3_600_000);
-  if (local.getUTCHours() < 6) local.setUTCDate(local.getUTCDate() - 1);
+  if (local.getUTCHours() < startHour) local.setUTCDate(local.getUTCDate() - 1);
   return local.toISOString().slice(0, 10);
 }
 

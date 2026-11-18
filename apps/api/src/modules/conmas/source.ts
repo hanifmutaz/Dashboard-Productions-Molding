@@ -24,6 +24,10 @@ export interface SourceRecord {
   poNo: string | null;
   ctActual: number | null;
   plannedMinutes: number | null;
+  /** OEE / Availability / Performance as published by ConMas, normalised to percent (0-100). null when the column is absent or empty. */
+  oee: number | null;
+  availability: number | null;
+  performance: number | null;
   personnel: { leader: string | null; cell: string | null; technician: string | null; operator: string | null };
   /** ISO with offset; null when the source timestamp is missing/invalid. */
   updatedAt: string | null;
@@ -45,11 +49,19 @@ export interface ConmasSource {
   invalidate(): void;
 }
 
+/** Optional ConMas columns holding OEE / Availability / Performance (owner 2026-11-17: read them from ConMas). */
+export interface RateColumns { oee: string | null; availability: string | null; performance: string | null }
+export const NO_RATE_COLUMNS: RateColumns = { oee: null, availability: null, performance: null };
+
 export interface ConmasConfig {
   view: string;
   tzOffset: string;
   cacheTtlSeconds: number;
   cols: { recordId: string | null; revNo: string | null; deleted: string | null; updatedAt: string | null };
+  /** Columns for OEE/Availability/Performance. Used only when they really exist in the view. */
+  rates?: RateColumns;
+  /** `percent`: ConMas stores 0-100. `fraction`: ConMas stores 0-1 and is multiplied by 100. */
+  rateScale?: 'percent' | 'fraction';
 }
 
 // ---------- row validation & normalisation (pure, unit-tested) ----------
@@ -86,6 +98,13 @@ export function parseHourLabel(label: string | null): number | null {
   return m ? Number(m[1]) % 24 : null;
 }
 
+/** Optional rate value: absent / empty / non-numeric -> null (never invalidates the row). */
+export function parseRate(raw: unknown, scale: 'percent' | 'fraction'): number | null {
+  const r = num.safeParse(raw);
+  if (!r.success || r.data === null) return null;
+  return scale === 'fraction' ? r.data * 100 : r.data;
+}
+
 export function normalizeRow(row: Record<string, unknown>, cfg: ConmasConfig): SourceRecord | null {
   const H = HEADER_COLUMNS;
   const date = typeof row[H.productionDate] === 'string' ? (row[H.productionDate] as string).slice(0, 10) : null;
@@ -96,6 +115,8 @@ export function normalizeRow(row: Record<string, unknown>, cfg: ConmasConfig): S
   const nums = { plan: n(H.outputPlan), actual: n(H.outputActual), gross: n(H.outputGross), ng: n(H.ngQty), ct: n(H.ctActual), planned: n(H.plannedMinutes) };
   if (Object.values(nums).some((r) => !r.success)) return null;
   const v = (r: (typeof nums)['plan']) => (r.success ? r.data : null);
+  const rc = cfg.rates ?? NO_RATE_COLUMNS, rs = cfg.rateScale ?? 'percent';
+  const rate = (c: string | null) => (c ? parseRate(row[c], rs) : null);
   const slots: SourceSlot[] = [];
   HOUR_BLOCKS.forEach((b, block) => {
     const startHour = parseHourLabel(text.parse(row[b.label]));
@@ -122,6 +143,7 @@ export function normalizeRow(row: Record<string, unknown>, cfg: ConmasConfig): S
     plan: v(nums.plan), actual: v(nums.actual), gross: v(nums.gross), ngQty: v(nums.ng),
     dpNo: text.parse(row[H.dpNo]), productName: text.parse(row[H.productName]), poNo: text.parse(row[H.poNo]),
     ctActual: v(nums.ct), plannedMinutes: v(nums.planned),
+    oee: rate(rc.oee), availability: rate(rc.availability), performance: rate(rc.performance),
     personnel: { leader: text.parse(row[H.leaderNik]), cell: text.parse(row[H.cellLeaderNik]), technician: text.parse(row[H.technicianNik]), operator: text.parse(row[H.operatorNik]) },
     updatedAt: cfg.cols.updatedAt ? toIsoWithOffset(row[cfg.cols.updatedAt], cfg.tzOffset) : null,
     slots,
@@ -150,6 +172,8 @@ export const machineSort = (a: string, b: string) => {
 export function createConmasSource(pool: pg.Pool, cfg: ConmasConfig, log: Logger): ConmasSource {
   const cache = new Map<string, { at: number; value: SourceResult }>();
   let schemaCheck: { at: number; missing: string[] } | null = null;
+  /** Rate columns that are configured AND present in the view; the rest are silently skipped (shown as "—" with a reason). */
+  let activeRates: RateColumns = NO_RATE_COLUMNS;
   const sysCols = Object.entries(cfg.cols).filter(([, v]) => !v).map(([k]) => k);
 
   async function missingColumns(): Promise<string[]> {
@@ -159,6 +183,11 @@ export function createConmasSource(pool: pg.Pool, cfg: ConmasConfig, log: Logger
     const wanted = [...ALL_DATA_COLUMNS, ...Object.values(cfg.cols).filter((x): x is string => !!x)];
     const missing = have.size === 0 ? ['<view tidak ditemukan atau tidak ada hak SELECT>'] : wanted.filter((c) => !have.has(c));
     schemaCheck = { at: Date.now(), missing };
+    const want = cfg.rates ?? NO_RATE_COLUMNS;
+    const pick = (c: string | null) => (c && have.has(c) ? c : null);
+    activeRates = { oee: pick(want.oee), availability: pick(want.availability), performance: pick(want.performance) };
+    const absent = (Object.keys(want) as (keyof RateColumns)[]).filter((k) => want[k] && !activeRates[k]).map((k) => want[k]);
+    if (absent.length) log.warn({ absent }, 'ConMas rate columns configured but not found in view; OEE/Availability/Performance stay unavailable');
     if (missing.length) log.warn({ missing: missing.slice(0, 20), count: missing.length }, 'ConMas schema drift detected');
     return missing;
   }
@@ -176,7 +205,8 @@ export function createConmasSource(pool: pg.Pool, cfg: ConmasConfig, log: Logger
   async function query(from: string, to: string, machineNo?: string): Promise<SourceResult> {
     await guard();
     const c = cfg.cols as { recordId: string; revNo: string; deleted: string; updatedAt: string };
-    const cols = [...new Set([...ALL_DATA_COLUMNS, c.recordId, c.revNo, c.deleted, c.updatedAt])].map(quote).join(', ');
+    const rateCols = Object.values(activeRates).filter((x): x is string => !!x);
+    const cols = [...new Set([...ALL_DATA_COLUMNS, c.recordId, c.revNo, c.deleted, c.updatedAt, ...rateCols])].map(quote).join(', ');
     const values: unknown[] = [from, to];
     let sql = `SELECT ${cols} FROM ${quote(cfg.view)} WHERE ${quote(HEADER_COLUMNS.productionDate)} >= $1::date AND ${quote(HEADER_COLUMNS.productionDate)} < ($2::date + 1)`;
     if (machineNo) {
@@ -196,7 +226,7 @@ export function createConmasSource(pool: pg.Pool, cfg: ConmasConfig, log: Logger
     const kept: { rec: SourceRecord; rev: number }[] = [];
     for (const row of res.rows) {
       if (TRUTHY.has(str(row[c.deleted]).trim().toLowerCase())) continue;
-      const rec = normalizeRow(row, cfg);
+      const rec = normalizeRow(row, { ...cfg, rates: activeRates });
       const rev = Number(row[c.revNo]);
       if (!rec || !Number.isFinite(rev)) {
         invalid++;

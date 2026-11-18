@@ -25,6 +25,8 @@ const app = createApp({
   conmas: createConmasSource(conmasPool, {
     view: config.CONMAS_VIEW, tzOffset: offset, cacheTtlSeconds: config.CONMAS_CACHE_TTL_SECONDS,
     cols: { recordId: config.CONMAS_COL_RECORD_ID, revNo: config.CONMAS_COL_REV_NO, deleted: config.CONMAS_COL_DELETED, updatedAt: config.CONMAS_COL_UPDATED_AT },
+    rates: { oee: config.CONMAS_COL_OEE, availability: config.CONMAS_COL_AVAILABILITY, performance: config.CONMAS_COL_PERFORMANCE },
+    rateScale: config.CONMAS_RATE_SCALE,
   }, log),
   log,
   publicOrigin: config.PUBLIC_ORIGIN,

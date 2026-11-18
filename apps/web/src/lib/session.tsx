@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { DEFAULT_PREFERENCES, DEFAULT_SETTINGS, type Permission, type Preferences, type Settings, type WhoAmI } from '@mpd/contracts';
 import { ApiFailure, api, setCsrf } from './api';
+import { setProductionDayStart } from './period';
 
 interface Ctx {
   me: WhoAmI | null;
@@ -29,10 +30,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => setCsrf(me?.kind === 'user' ? me.csrfToken : null), [me]);
   const settingsQ = useQuery({ queryKey: ['settings'], queryFn: () => api.get<Settings>('/api/settings'), enabled: !!me, staleTime: 5 * 60_000 });
   const prefsQ = useQuery({ queryKey: ['prefs'], queryFn: () => api.get<Preferences>('/api/me/preferences'), enabled: me?.kind === 'user', staleTime: Infinity });
+  const settings = settingsQ.data ?? FALLBACK_SETTINGS;
+  setProductionDayStart(settings.shifts.s1);
   const value: Ctx = {
     me,
     loading: meQ.isPending || (!!me && settingsQ.isPending),
-    settings: settingsQ.data ?? FALLBACK_SETTINGS,
+    settings,
     prefs: prefsQ.data ?? DEFAULT_PREFERENCES,
     can: (p) => me?.kind === 'user' && me.user.permissions.includes(p),
     savePrefs: async (p) => {
