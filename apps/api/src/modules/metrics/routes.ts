@@ -1,36 +1,39 @@
 import { Router, type Request } from 'express';
 import { z } from 'zod';
 import {
-  IsoDate, MachineFilterSchema, PERMISSIONS, RangeQuerySchema, StopQuerySchema,
+  IsoDate, MACHINE_PERSONNEL_ROLES, MachineFilterSchema, PERMISSIONS, RangeQuerySchema, StopQuerySchema,
   type Notice, type SettingsBody, type StopCategory, type ViewDataEnvelope,
 } from '@mpd/contracts';
 import type { Repos } from '../../db/repos.js';
-import { forbidden, unauthorized } from '../../http/errors.js';
+import { forbidden, notFound, unauthorized } from '../../http/errors.js';
 import { parse, requirePermission } from '../../http/middleware.js';
 import { SourceUnavailable, type ConmasSource, type SourceRecord } from '../conmas/source.js';
 import { readSettings } from '../settings/routes.js';
 import { categoryResolver } from './categories.js';
 import { applyFreshness, currentProductionDate } from './freshness.js';
-import { buildDailyRates, buildMachineDetail, buildMachineList, buildProduction, buildSales, buildScrap, buildStopTime, buildUtilization, partKey, daysBetween, filterMachines, type Range, type ScrapMaterial, type ScrapPart } from './views.js';
+import { findPersonnelPhoto, isPhotoNik } from './personnelPhotos.js';
+import { buildDailyRates, buildMachineDetail, buildMachineList, buildProduction, buildSales, buildScrap, buildStopTime, buildUtilization, partKey, daysBetween, filterMachines, latestMachineRecord, type Range, type ScrapMaterial, type ScrapPart } from './views.js';
 
 export interface MetricsCache { settings: SettingsBody | null; categories: StopCategory[] | null }
 
-export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: MetricsCache, tzOffsetMinutes: number): Router {
+export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: MetricsCache, tzOffsetMinutes: number, employeePhotoDir?: string): Router {
   const r = Router();
   const settings = async () => (cache.settings ??= await readSettings(repos));
   const categories = async () => (cache.categories ??= await repos.master.categories());
   const shiftDate = (d: string, n: number) => new Date(Date.parse(d) + n * 864e5).toISOString().slice(0, 10);
 
-  async function envelope<T>(load: () => Promise<{ records: SourceRecord[]; invalid: number; build: (rs: SourceRecord[]) => T }>): Promise<ViewDataEnvelope<T>> {
+  async function envelope<T>(range: Pick<Range, 'from' | 'to'>, load: () => Promise<{ records: SourceRecord[]; invalid: number; build: (rs: SourceRecord[]) => T }>, keepEmpty = false): Promise<ViewDataEnvelope<T>> {
     const generatedAt = new Date().toISOString();
     try {
       const s = await settings();
       const { records, invalid, build } = await load();
-      const f = applyFreshness(records, new Date(), s.data, tzOffsetMinutes, s.shifts.s1);
+      const now = new Date();
+      const today = currentProductionDate(now, tzOffsetMinutes, s.shifts.s1);
+      const f = applyFreshness(records, now, s.data, tzOffsetMinutes, s.shifts.s1, range.from <= today && today <= range.to);
       const notices: Notice[] = [...f.notices];
       if (invalid) notices.push({ code: 'INVALID_ROWS', message: `${invalid} baris sumber tidak valid dan diabaikan.` });
-      const state = !f.records.length ? (f.freshness === 'unavailable' || f.freshness === 'unknown' ? 'unavailable' : 'empty') : f.freshness === 'stale' ? 'stale' : 'current';
-      return { state, data: build(f.records), freshness: f.freshness, sourceUpdatedAt: f.sourceUpdatedAt, generatedAt, notices };
+      const state = !f.records.length ? (f.freshness === 'unavailable' || f.freshness === 'unknown' ? 'unavailable' : 'empty') : f.freshness === 'stale' || f.freshness === 'unknown' || f.freshness === 'unavailable' ? 'stale' : 'current';
+      return { state, data: f.records.length || keepEmpty ? build(f.records) : null, freshness: f.freshness, sourceUpdatedAt: f.sourceUpdatedAt, generatedAt, notices };
     } catch (e) {
       if (e instanceof SourceUnavailable) return { state: 'unavailable', data: null, freshness: 'unavailable', sourceUpdatedAt: null, generatedAt, notices: [{ code: e.code, message: e.message }] };
       throw e;
@@ -41,19 +44,20 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     return { from: q.from, to: q.to, shift: q.shift ?? null, days: daysBetween(q.from, q.to) };
   };
   const loadRange = async (range: Range) => {
-    const cur = await conmas.records(range.from, range.to);
-    const prev = await conmas.records(shiftDate(range.from, -range.days), shiftDate(range.from, -1)).catch(() => null);
+    const [cur, prev] = await Promise.all([conmas.records(range.from, range.to), conmas.records(shiftDate(range.from, -range.days), shiftDate(range.from, -1)).catch(() => null)]);
     return { cur, prev };
   };
+
+  const shiftsOf = (rs: SourceRecord[], shift: Range['shift']) => shift ? rs.filter((r) => r.shift === shift) : rs;
 
   r.get('/v1/monitoring/production', requirePermission(PERMISSIONS.viewProduction), async (req, res) => {
     const range = rangeOf(req);
     const mf = parse(MachineFilterSchema, req.query);
     const s = await settings();
     const { resolve } = categoryResolver(await categories());
-    res.json(await envelope(async () => {
+    res.json(await envelope(range, async () => {
       const { cur, prev } = await loadRange(range);
-      return { records: cur.records, invalid: cur.invalidRows, build: (rs) => buildProduction(filterMachines(rs, mf, s, range.shift), prev ? filterMachines(prev.records, mf, s, range.shift) : null, range, s, resolve) };
+      return { records: shiftsOf(filterMachines(cur.records, mf, s, range.shift), range.shift), invalid: cur.invalidRows, build: (rs) => buildProduction(rs, prev ? filterMachines(prev.records, mf, s, range.shift) : null, range, s, resolve) };
     }));
   });
 
@@ -62,9 +66,9 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     const mf = parse(MachineFilterSchema, req.query);
     const s = await settings();
     const { resolve } = categoryResolver(await categories());
-    res.json(await envelope(async () => {
+    res.json(await envelope(range, async () => {
       const { cur, prev } = await loadRange(range);
-      return { records: cur.records, invalid: cur.invalidRows, build: (rs) => buildUtilization(filterMachines(rs, mf, s, range.shift), prev ? filterMachines(prev.records, mf, s, range.shift) : null, range, s, resolve) };
+      return { records: shiftsOf(filterMachines(cur.records, mf, s, range.shift), range.shift), invalid: cur.invalidRows, build: (rs) => buildUtilization(rs, prev ? filterMachines(prev.records, mf, s, range.shift) : null, range, s, resolve) };
     }));
   });
 
@@ -75,9 +79,9 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     const s = await settings();
     const { resolve, refs } = categoryResolver(await categories());
     const filter = { group: f.group, category: f.category, includeInfo: f.includeInfo ? f.includeInfo === 'true' : s.disp.info };
-    res.json(await envelope(async () => {
+    res.json(await envelope(range, async () => {
       const { cur, prev } = await loadRange(range);
-      return { records: cur.records, invalid: cur.invalidRows, build: (rs) => buildStopTime(filterMachines(rs, mf, s, range.shift), prev ? filterMachines(prev.records, mf, s, range.shift) : null, range, refs, resolve, filter) };
+      return { records: shiftsOf(filterMachines(cur.records, mf, s, range.shift), range.shift), invalid: cur.invalidRows, build: (rs) => buildStopTime(rs, prev ? filterMachines(prev.records, mf, s, range.shift) : null, range, refs, resolve, filter) };
     }));
   });
 
@@ -86,12 +90,14 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     if (!p) throw unauthorized();
     if (p.kind !== 'user' || !(p.permissions.includes(PERMISSIONS.viewProduction) || p.permissions.includes(PERMISSIONS.viewUtilization))) throw forbidden();
     const range = rangeOf(req);
+    const mf = parse(MachineFilterSchema, req.query);
     const { machineNo } = parse(z.object({ machineNo: z.string().trim().max(20).optional() }), req.query);
     const s = await settings();
     const { resolve } = categoryResolver(await categories());
-    res.json(await envelope(async () => {
+    res.json(await envelope(range, async () => {
       const cur = await conmas.records(range.from, range.to);
-      return { records: cur.records, invalid: cur.invalidRows, build: (rs) => buildDailyRates(rs, range, machineNo ?? null, s, resolve) };
+      const selected = shiftsOf(filterMachines(cur.records, mf, s, range.shift), range.shift);
+      return { records: machineNo ? selected.filter((r) => r.machineNo === machineNo) : selected, invalid: cur.invalidRows, build: (rs) => buildDailyRates(rs, range, machineNo ?? null, s, resolve) };
     }));
   });
 
@@ -103,9 +109,9 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
       const k = partKey(p.dpNo);
       if (k) prices.set(k, p.pricePerPcs);
     }
-    res.json(await envelope(async () => {
+    res.json(await envelope(range, async () => {
       const cur = await conmas.records(range.from, range.to);
-      return { records: cur.records, invalid: cur.invalidRows, build: (rs) => buildSales(rs, prices, range) };
+      return { records: shiftsOf(cur.records, range.shift), invalid: cur.invalidRows, build: (rs) => buildSales(rs, prices, range) };
     }));
   });
 
@@ -116,9 +122,9 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     const parts = new Map<string, ScrapPart>(), materials = new Map<string, ScrapMaterial>();
     for (const p of partRows) { const k = partKey(p.dpNo); if (k) parts.set(k, { materialCode: p.materialCode, pricePerPcs: p.pricePerPcs }); }
     for (const m of matRows) materials.set(m.code, { name: m.name, pricePerGram: m.pricePerGram });
-    res.json(await envelope(async () => {
+    res.json(await envelope(range, async () => {
       const cur = await conmas.records(range.from, range.to);
-      return { records: cur.records, invalid: cur.invalidRows, build: (rs) => buildScrap(rs, parts, materials, range) };
+      return { records: shiftsOf(cur.records, range.shift), invalid: cur.invalidRows, build: (rs) => buildScrap(rs, parts, materials, range) };
     }));
   });
 
@@ -127,25 +133,60 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     const s0 = await settings();
     const { date = currentProductionDate(new Date(), tzOffsetMinutes, s0.shifts.s1) } = parse(DateQuery, req.query);
     const { resolve } = categoryResolver(await categories());
-    res.json(await envelope(async () => {
+    res.json(await envelope({ from: date, to: date }, async () => {
       const [cur, adj, known] = await Promise.all([conmas.records(date, date), conmas.adjacentDates(date), conmas.machines().catch(() => [])]);
       return { records: cur.records, invalid: cur.invalidRows, build: (rs) => buildMachineList(rs, known.map((m) => m.machineNo), date, adj, resolve) };
-    }));
+    }, true));
   });
 
-  r.get('/v1/machine-detail/:machineNo', async (req, res) => {
+  function permittedMachine(req: Request) {
     const machineNo = String(req.params.machineNo);
     const p = req.principal;
     if (!p) throw unauthorized();
-    // Kiosk credential is locked to exactly one machine and is read-only (ADR-019).
+    // A kiosk can only read the dashboard and personnel photos for its paired machine.
     if (p.kind === 'kiosk' ? p.machineNo !== machineNo : !p.permissions.includes(PERMISSIONS.viewMachineDetail)) throw forbidden();
+    return machineNo;
+  }
+  const machineDate = (req: Request, s: SettingsBody) => parse(DateQuery, req.query).date
+    ?? currentProductionDate(new Date(), tzOffsetMinutes, s.shifts.s1);
+
+  r.get('/v1/machine-detail/:machineNo/personnel-photo/:role', async (req, res) => {
+    const machineNo = permittedMachine(req);
+    const role = parse(z.enum(MACHINE_PERSONNEL_ROLES), req.params.role);
     const s = await settings();
-    const { date = currentProductionDate(new Date(), tzOffsetMinutes, s.shifts.s1) } = parse(DateQuery, req.query);
+    if (!employeePhotoDir || !s.md.pic) throw notFound('Foto personel');
+    const date = machineDate(req, s);
+    const result = await envelope({ from: date, to: date }, async () => {
+      const cur = await conmas.records(date, date, machineNo);
+      return { records: cur.records, invalid: cur.invalidRows, build: (rs) => latestMachineRecord(rs, machineNo, date)?.personnel[role] ?? null };
+    });
+    if (!isPhotoNik(result.data) || req.query.nik !== result.data) throw notFound('Foto personel');
+    const file = await findPersonnelPhoto(employeePhotoDir, result.data);
+    if (!file) throw notFound('Foto personel');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.sendFile(file, { cacheControl: false });
+  });
+
+  r.get('/v1/machine-detail/:machineNo', async (req, res) => {
+    const machineNo = permittedMachine(req);
+    const s = await settings();
+    const date = machineDate(req, s);
     const { resolve } = categoryResolver(await categories());
-    res.json(await envelope(async () => {
+    res.json(await envelope({ from: date, to: date }, async () => {
       const [cur, adj] = await Promise.all([conmas.records(date, date, machineNo), conmas.adjacentDates(date, machineNo)]);
-      return { records: cur.records, invalid: cur.invalidRows, build: (rs) => buildMachineDetail(machineNo, date, rs, adj, resolve, s) };
-    }));
+      return { records: cur.records, invalid: cur.invalidRows, build: (rs) => {
+        const detail = buildMachineDetail(machineNo, date, rs, adj, resolve, s);
+        if (employeePhotoDir && s.md.pic) {
+          for (const person of detail.personnel) {
+            if (isPhotoNik(person.nik)) {
+              person.photoUrl = '/api/v1/machine-detail/' + encodeURIComponent(machineNo)
+                + '/personnel-photo/' + person.role + '?' + new URLSearchParams({ date, nik: person.nik }).toString();
+            }
+          }
+        }
+        return detail;
+      } };
+    }, true));
   });
   return r;
 }

@@ -23,13 +23,14 @@ export function DataTable<R>(p: TableProps<R>) {
   const [sort, setSort] = useState(p.sort ?? { k: p.cols[0]?.k ?? '', asc: true });
   const [open, setOpen] = useState<string | null>(null);
   const [page, setPage] = useState(0);
-  const sv = (r: R, k: string) => { const c = p.cols.find((x) => x.k === k); return c?.sv ? c.sv(r) : ((r as Record<string, unknown>)[k] as number | string | null | undefined) ?? null; };
-  const sorted = [...p.rows].sort((a, b) => {
-    const x = sv(a, sort.k), y = sv(b, sort.k);
+  const column = p.cols.find((x) => x.k === sort.k);
+  const sortValue = (row: R) => column?.sv ? column.sv(row) : ((row as Record<string, unknown>)[sort.k] as number | string | null | undefined) ?? null;
+  const sorted = column && !column.nos ? [...p.rows].sort((a, b) => {
+    const x = sortValue(a), y = sortValue(b);
     if (typeof x === 'string' || typeof y === 'string') return sort.asc ? String(x ?? '').localeCompare(String(y ?? '')) : String(y ?? '').localeCompare(String(x ?? ''));
     const xx = x ?? -1e18, yy = y ?? -1e18;
     return sort.asc ? xx - yy : yy - xx;
-  });
+  }) : p.rows;
   const ps = p.pageSize, pages = ps ? Math.max(1, Math.ceil(sorted.length / ps)) : 1, pg = Math.min(page, pages - 1);
   const shown = ps ? sorted.slice(pg * ps, pg * ps + ps) : sorted;
   const onHead = (c: Col<R>) => {
@@ -51,8 +52,8 @@ export function DataTable<R>(p: TableProps<R>) {
               {p.cols.map((c) => (
                 <th key={c.k} className={`${c.n ? 'n' : ''}${c.nos ? ' nos' : ''}${sort.k === c.k && !c.nos ? ' s' + (sort.asc ? ' a' : '') : ''}`}
                   aria-sort={c.nos ? undefined : sort.k === c.k ? (sort.asc ? 'ascending' : 'descending') : 'none'}
-                  onClick={() => onHead(c)} onKeyDown={(e) => e.key === 'Enter' && onHead(c)} tabIndex={c.nos ? undefined : 0}>
-                  {c.h}
+                  onClick={() => onHead(c)} >
+                  {c.nos ? c.h : <button className="sort-control" type="button">{c.h}</button>}
                 </th>
               ))}
             </tr>
@@ -63,11 +64,11 @@ export function DataTable<R>(p: TableProps<R>) {
               return (
                 <Fragment key={k}>
                   <tr className={`${clickable ? 'r' : ''}${isOpen ? ' open' : ''}`} tabIndex={clickable ? 0 : undefined} aria-expanded={p.expand ? isOpen : undefined}
-                    onClick={clickable ? () => activate(r) : undefined} onKeyDown={clickable ? (e) => e.key === 'Enter' && activate(r) : undefined}>
+                    onClick={clickable ? () => activate(r) : undefined} onKeyDown={clickable ? (e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); activate(r); } } : undefined}>
                     {p.cols.map((c) => <td key={c.k} className={`${c.n ? 'n' : ''}${c.cl ? ' ' + c.cl : ''}`}>{c.f ? c.f(r) : cellText((r as Record<string, unknown>)[c.k])}</td>)}
                   </tr>
                   {isOpen && p.expand && (
-                    <tr className="ex"><td colSpan={50}><div className="exin">{p.expand(r)}</div></td></tr>
+                    <tr className="ex"><td colSpan={p.cols.length}><div className="exin">{p.expand(r)}</div></td></tr>
                   )}
                 </Fragment>
               );
@@ -99,7 +100,12 @@ export function Pager({ page, pages, go }: { page: number; pages: number; go: (p
 }
 
 export function downloadCsv(name: string, rows: (string | number | null)[][]) {
-  const s = '\ufeff' + rows.map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const s = '\ufeff' + rows.map((r) => r.map((c) => {
+    const value = String(c ?? '');
+    const numeric = /^[+-]?\d+(?:[.,]\d+)?$/.test(value);
+    const literal = typeof c === 'string' && !numeric && /^[\s\uFEFF]*[=+\-@]|^[\t\r\n]/.test(value) ? "'" + value : value;
+    return `"${literal.replace(/"/g, '""')}"`;
+  }).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([s], { type: 'text/csv' }));
   a.download = name;

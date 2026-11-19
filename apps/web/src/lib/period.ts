@@ -1,15 +1,12 @@
-import { add, iso, lbl, lblY, pd } from './format';
+import type { SettingsBody } from '@mpd/contracts';
+import { add, hh, iso, lbl, lblY, pd } from './format';
 
 export const PRESETS = { lw_tw: 'Last week – this week', tw: 'This week', lw: 'Last week', l7: 'Last 7 days', tm: 'This month', lm: 'Last month' } as const;
 export type Preset = keyof typeof PRESETS | 'custom';
 
-/** Hour at which the production day starts = shift 1 start (Settings; default 06:00). Set once from the session settings. */
-let dayStartHour = 6;
-export const setProductionDayStart = (h: number) => { dayStartHour = h; };
-
-/** Production date (the last shift counts on the date it starts), in plant time (UTC+7). */
-export function productionToday(now = new Date(), startHour = dayStartHour): string {
-  const local = new Date(now.getTime() + 7 * 3_600_000);
+/** Production date in plant time (the overnight shift belongs to the date it starts). */
+export function productionToday(now = new Date(), startHour = 6, offsetMinutes = 420): string {
+  const local = new Date(now.getTime() + offsetMinutes * 60_000);
   if (local.getUTCHours() < startHour) local.setUTCDate(local.getUTCDate() - 1);
   return local.toISOString().slice(0, 10);
 }
@@ -28,4 +25,9 @@ export function presetRange(p: keyof typeof PRESETS, today = productionToday()):
   if (iso(b) > today) b = t;
   return { from: iso(a), to: iso(b) };
 }
+export const shiftStarts = (shifts: SettingsBody['shifts']) => [shifts.s1, shifts.s2, shifts.s3] as const;
+export const shiftLabel = (shifts: SettingsBody['shifts'], shift: number) => {
+  const starts = shiftStarts(shifts);
+  return `Shift ${shift} · ${hh(starts[shift - 1]!)}–${hh(starts[shift % 3]!)}`;
+};
 export const rangeTxt = (from: string, to: string) => `${lbl(from)} – ${lblY(to)}`;

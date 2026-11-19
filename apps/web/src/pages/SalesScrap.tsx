@@ -4,7 +4,7 @@ import { fmt, fmtPrice, kf, lbl, lblY, MN, rp, tokenColor } from '../lib/format'
 import { Chart } from '../components/charts';
 import { EmptyDeck, Kpi, SkelDeck } from '../components/kpi';
 import { DataTable, type Col } from '../components/table';
-import { useMonitoring } from './Production';
+import { useMonitoring } from '../lib/monitoring';
 import { EnvelopeBanner, emptyMsg } from '../components/state';
 
 /* Sales: rumus final (Q-009, owner 2026-11-18). Scrap: NG gram ConMas x harga material per gram (Master Data); rumus nilai PROPOSED, menunggu approver Quality/Finance.
@@ -24,7 +24,7 @@ export function SalesPage() {
   ];
   return (
     <section className="view on"><div className="content">
-      <EnvelopeBanner env={env} error={q.error} />
+      <EnvelopeBanner env={env} error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       {v ? (
         <div className="deck">
           <Kpi l="Sales" v={v.total.value === null ? '—' : kf(v.total.value)} u={v.total.value === null ? undefined : 'Rp'} title={v.total.reason ?? undefined} desc={v.total.value === null ? undefined : rp(v.total.value)} />
@@ -32,15 +32,16 @@ export function SalesPage() {
           <Kpi l="Average price" v={v.averagePrice.value === null ? '—' : fmtPrice(Math.round(v.averagePrice.value * 100) / 100)} u="Rp/pcs" title={v.averagePrice.reason ?? undefined} />
         </div>
       ) : q.isPending ? <SkelDeck n={3} /> : <div className="deck"><EmptyDeck labels={['Sales', 'Production actual', 'Average price']} msg={msg} /></div>}
+      {v && <p className="note">Periode ini dinilai dengan harga part yang berlaku saat laporan dimuat.</p>}
       {v && v.uncoveredQty > 0 && <div className="banner w" role="status">{fmt(v.uncoveredQty)} pcs output berasal dari part tanpa Harga/PCS di <Link className="lnk" to="/master-data">Master Data</Link>. Output itu tidak dihitung ke Sales (bukan dianggap Rp 0).</div>}
       <div className="g2e">
         <div className="card"><div className="ch"><div><h3>Sales per month</h3><p>Rp · bulan di dalam rentang tanggal yang dipilih</p></div></div><div className="cb">
           {v && v.byMonth.length ? <Chart aria="Sales per month" labels={v.byMonth.map((m) => monthLbl(m.key))} h={240} bw={28} yFmt={kf} vFmt={kf} tipT={(i) => monthLbl(v.byMonth[i]!.key)}
-            bars={[{ name: 'Sales (Rp)', col: 'var(--act)', vals: v.byMonth.map((m) => m.sales) }]} tipX={(i) => [{ label: 'Actual', value: fmt(v.byMonth[i]!.goodQty) + ' pcs' }]} /> : <div className="chw" style={{ height: 'var(--s-size-240)' }}><div className="empty" role="status">{msg || 'Tidak ada data'}</div></div>}
+            bars={[{ name: 'Sales (Rp)', col: 'var(--act)', vals: v.byMonth.map((m) => m.hasValuation === false ? null : m.sales) }]} tipX={(i) => [{ label: 'Actual', value: fmt(v.byMonth[i]!.goodQty) + ' pcs' }]} /> : <div className="chw" style={{ height: 'var(--s-size-240)' }}><div className="empty" role="status">{msg || 'Tidak ada data'}</div></div>}
         </div></div>
         <div className="card"><div className="ch"><div><h3>Sales per day</h3><p>Rp per hari produksi</p></div></div><div className="cb">
           {v && v.byDay.length ? <Chart aria="Sales per day" labels={v.byDay.map((d) => lbl(d.key))} h={240} bw={18} yFmt={kf} vFmt={kf} tipT={(i) => lblY(v.byDay[i]!.key)}
-            bars={[{ name: 'Sales (Rp)', col: 'var(--act)', vals: v.byDay.map((d) => d.sales) }]} tipX={(i) => [{ label: 'Actual', value: fmt(v.byDay[i]!.goodQty) + ' pcs' }]} /> : <div className="chw" style={{ height: 'var(--s-size-240)' }}><div className="empty" role="status">{msg || 'Tidak ada data'}</div></div>}
+            bars={[{ name: 'Sales (Rp)', col: 'var(--act)', vals: v.byDay.map((d) => d.hasValuation === false ? null : d.sales) }]} tipX={(i) => [{ label: 'Actual', value: fmt(v.byDay[i]!.goodQty) + ' pcs' }]} /> : <div className="chw" style={{ height: 'var(--s-size-240)' }}><div className="empty" role="status">{msg || 'Tidak ada data'}</div></div>}
         </div></div>
       </div>
       <div className="card"><div className="ch"><div><h3>Breakdown per part</h3><p>Per DP Part, dalam Rupiah</p></div></div><div className="cb">
@@ -54,7 +55,7 @@ export function SalesPage() {
 const pct = (v: number) => v.toFixed(2) + '%';
 const kg = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString('en-US', { maximumFractionDigits: 2 }));
 const MAT_COLORS = ['s-paint-6366f1', 's-paint-ec4899', 's-paint-c026d3', 's-paint-92400e', 's-paint-4f46e5', 's-paint-94a3b8'];
-const dash = (m: { value: number | null; reason: string | null }, f: (n: number) => string) => (m.value === null ? <span title={m.reason ?? undefined}>—</span> : f(m.value));
+const dash = (m: { value: number | null; reason: string | null }, f: (n: number) => string) => (m.value === null && m.reason ? <details><summary title={m.reason}>—</summary>{m.reason}</details> : m.value === null ? '—' : f(m.value));
 
 export function ScrapPage() {
   const q = useMonitoring<ScrapView>('scrap');
@@ -67,8 +68,8 @@ export function ScrapPage() {
   v?.byMonth.forEach((m) => m.materials.forEach((x) => { if (x.code) totals.set(x.code, (totals.get(x.code) ?? 0) + x.value); }));
   const top = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([c]) => c);
   const monthBars = v ? [
-    ...top.map((c, i) => ({ name: names.get(c) ?? c, col: tokenColor(MAT_COLORS[i]!), vals: v.byMonth.map((m) => m.materials.find((x) => x.code === c)?.value ?? 0) })),
-    ...(totals.size > top.length ? [{ name: 'Lainnya', col: tokenColor(MAT_COLORS[5]!), vals: v.byMonth.map((m) => m.materials.filter((x) => !x.code || !top.includes(x.code)).reduce((a, x) => a + x.value, 0)) }] : []),
+    ...top.map((c, i) => ({ name: names.get(c) ?? c, col: tokenColor(MAT_COLORS[i]!), vals: v.byMonth.map((m) => m.hasValuation === false ? null : (m.materials.find((x) => x.code === c)?.value ?? 0)) })),
+    ...(totals.size > top.length ? [{ name: 'Lainnya', col: tokenColor(MAT_COLORS[5]!), vals: v.byMonth.map((m) => m.hasValuation === false ? null : m.materials.filter((x) => !x.code || !top.includes(x.code)).reduce((a, x) => a + x.value, 0)) }] : []),
   ] : [];
   const matCols: Col<ScrapMaterialRow>[] = [
     { k: 'code', h: 'DP Material', cl: 'mu', sv: (m) => m.code, f: (m) => m.code ?? 'Tanpa material' },
@@ -89,7 +90,7 @@ export function ScrapPage() {
   ];
   return (
     <section className="view on"><div className="content">
-      <EnvelopeBanner env={env} error={q.error} />
+      <EnvelopeBanner env={env} error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       {v ? (
         <div className="deck">
           <Kpi l="Scrap value" v={v.scrapValue.value === null ? '—' : kf(v.scrapValue.value)} u={v.scrapValue.value === null ? undefined : 'Rp'} title={v.scrapValue.reason ?? undefined} desc={v.scrapValue.value === null ? undefined : rp(v.scrapValue.value)} />
@@ -97,18 +98,19 @@ export function ScrapPage() {
           <Kpi l="Scrap ratio" v={v.ratio.value === null ? '—' : v.ratio.value.toFixed(2)} u={v.ratio.value === null ? undefined : '%'} title={v.ratio.reason ?? undefined} desc="scrap value ÷ sales value" />
         </div>
       ) : q.isPending ? <SkelDeck n={3} /> : <div className="deck"><EmptyDeck labels={['Scrap value', 'Scrap weight', 'Scrap ratio']} msg={msg} /></div>}
+      {v && <div className="banner w" role="status">Nilai dan rasio Scrap masih menunggu persetujuan Quality/Finance. Valuasi memakai mapping dan harga Master Data saat laporan dimuat.</div>}
       {v?.priceUnitSuspect && <div className="banner w" role="status"><b>Cek satuan harga material.</b> Ada harga material ≥ Rp 10.000 per gram, yang tidak wajar untuk resin; kemungkinan harga di CSV per kg. Kalau benar, Scrap value dan ratio terlihat 1.000× terlalu besar. Perbaiki di <Link className="lnk" to="/master-data">Master Data</Link>.</div>}
       {v && v.unvaluedGram > 0 && <div className="banner w" role="status">{fmt(v.unvaluedGram)} gram scrap berasal dari part tanpa material atau material tanpa harga di <Link className="lnk" to="/master-data">Master Data</Link>. Gram itu tercatat di Scrap weight tetapi tidak dihitung ke Scrap value (bukan dianggap Rp 0).</div>}
       {v && v.recordsWithoutGram > 0 && <div className="banner w" role="status">{fmt(v.recordsWithoutGram)} dari {fmt(v.recordsTotal)} record produksi belum punya NG (gram) di ConMas. Record itu tidak dihitung sebagai scrap 0.</div>}
       <div className="card"><div className="ch"><div><h3>Scrap per month</h3><p>Rp per material (5 terbesar) · garis = scrap ratio (scrap ÷ sales)</p></div></div><div className="cb">
         {v && v.byMonth.length ? <Chart aria="Scrap per month" labels={v.byMonth.map((m) => monthLbl(m.key))} h={300} bw={34} stack yFmt={kf} vFmt={kf} tipT={(i) => monthLbl(v.byMonth[i]!.key)}
-          bars={monthBars.length ? monthBars : [{ name: 'Scrap value (Rp)', col: 'var(--act)', vals: v.byMonth.map(() => 0) }]}
+          bars={monthBars.length ? monthBars : [{ name: 'Scrap value (Rp)', col: 'var(--act)', vals: v.byMonth.map((m) => m.hasValuation === false ? null : m.scrapValue) }]}
           line={{ name: 'Scrap ratio', col: 'var(--plan)', axis: 'right', vals: v.byMonth.map((m) => m.ratio.value), fmt: pct }}
           tipX={(i) => [{ label: 'Scrap', value: kg(v.byMonth[i]!.scrapGram / 1000) + ' kg' }]} /> : empty}
       </div></div>
       <div className="card"><div className="ch"><div><h3>Scrap per day</h3><p>Rp per hari produksi · garis = scrap ratio</p></div></div><div className="cb">
         {v && v.byDay.length ? <Chart aria="Scrap per day" labels={v.byDay.map((d) => lbl(d.key))} h={280} bw={18} yFmt={kf} vFmt={kf} tipT={(i) => lblY(v.byDay[i]!.key)}
-          bars={[{ name: 'Scrap value (Rp)', col: 'var(--act)', vals: v.byDay.map((d) => d.scrapValue) }]}
+          bars={[{ name: 'Scrap value (Rp)', col: 'var(--act)', vals: v.byDay.map((d) => d.hasValuation === false ? null : d.scrapValue) }]}
           line={{ name: 'Scrap ratio', col: 'var(--plan)', axis: 'right', vals: v.byDay.map((d) => d.ratio.value), fmt: pct }}
           tipX={(i) => [{ label: 'Scrap', value: kg(v.byDay[i]!.scrapGram / 1000) + ' kg' }]} /> : empty}
       </div></div>

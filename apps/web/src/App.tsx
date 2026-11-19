@@ -17,6 +17,7 @@ const MachineListPage = lazy(() => import('./pages/Machines').then((m) => ({ def
 const MachineDetailPage = lazy(() => import('./pages/Machines').then((m) => ({ default: m.MachineDetailPage })));
 const MasterDataPage = lazy(() => import('./pages/MasterData').then((m) => ({ default: m.MasterDataPage })));
 const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })));
+const SystemStatusPage = lazy(() => import('./pages/SystemStatus').then((m) => ({ default: m.SystemStatusPage })));
 const ProfilePage = lazy(() => import('./pages/Profile').then((m) => ({ default: m.ProfilePage })));
 const UsersPage = lazy(() => import('./pages/Admin').then((m) => ({ default: m.UsersPage })));
 const KiosksPage = lazy(() => import('./pages/Admin').then((m) => ({ default: m.KiosksPage })));
@@ -30,11 +31,21 @@ function Loading() {
   return <div className="empty" role="status" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Memuat…</div>;
 }
 
+function SessionUnavailable() {
+  const { refreshMe } = useSession();
+  return <div className="authwrap"><section className="card authcard"><div className="cb problem-message" role="alert">
+    <h1 className="authh">Koneksi ke server bermasalah</h1>
+    <p className="mu">Status sesi belum bisa diperiksa.</p>
+    <button className="btn pri" type="button" onClick={() => void refreshMe()}>Coba lagi</button>
+  </div></section></div>;
+}
+
 /** Signed-in user required; a kiosk credential may only use /kiosk. */
 function RequireUser() {
-  const { me, loading } = useSession();
+  const { me, loading, sessionError } = useSession();
   const loc = useLocation();
   if (loading) return <Loading />;
+  if (sessionError) return <SessionUnavailable />;
   if (!me) return <Navigate to={`/login?next=${encodeURIComponent(loc.pathname + loc.search)}`} replace />;
   if (me.kind === 'kiosk') return <Navigate to="/kiosk" replace />;
   return <FilterProvider><AppShell /></FilterProvider>;
@@ -54,8 +65,8 @@ function RouteError() {
   return <ErrorPanel error={useRouteError()} />;
 }
 function Public() {
-  const { loading } = useSession();
-  return loading ? <Loading /> : <FilterProvider><Outlet /></FilterProvider>;
+  const { loading, sessionError } = useSession();
+  return loading ? <Loading /> : sessionError ? <SessionUnavailable /> : <FilterProvider><Outlet /></FilterProvider>;
 }
 const g = (key: string, el: ReactNode) => <Guard perm={PAGES.find((p) => p.key === key)?.perm}>{s(el)}</Guard>;
 
@@ -81,6 +92,7 @@ const router = createBrowserRouter([
           { path: 'admin/users', element: g('users', <UsersPage />) },
           { path: 'admin/kiosks', element: g('kiosks', <KiosksPage />) },
           { path: 'admin/audit', element: g('audit', <AuditPage />) },
+          { path: 'status', element: s(<SystemStatusPage />) },
           { path: 'profile', element: s(<ProfilePage />) },
           { path: 'forbidden', element: <ForbiddenPage /> },
           { path: '*', element: <NotFoundPage /> },

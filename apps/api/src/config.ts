@@ -28,6 +28,7 @@ const Schema = z
     SESSION_IDLE_MINUTES: z.coerce.number().int().min(5).default(480),
     SESSION_ABSOLUTE_HOURS: z.coerce.number().int().min(1).default(12),
     WEB_DIST: z.string().optional(),
+    EMPLOYEE_PHOTO_DIR: z.string().trim().optional(),
 
     APP_DB_HOST: z.string(),
     APP_DB_PORT: z.coerce.number().int().default(5432),
@@ -59,9 +60,15 @@ const Schema = z
     CONMAS_COL_OEE: identOrOff('cluster_1_36_n'),
     CONMAS_COL_AVAILABILITY: identOrOff('cluster_1_37_n'),
     CONMAS_COL_PERFORMANCE: identOrOff('cluster_1_38_n'),
+    CONMAS_COL_LEADER_NAME: identOrOff('cluster_1_15_t'),
+    CONMAS_COL_CELL_LEADER_NAME: identOrOff('cluster_1_16_t'),
+    CONMAS_COL_TECHNICIAN_NAME: identOrOff('cluster_1_33_t'),
+    CONMAS_COL_OPERATOR_NAME: identOrOff('cluster_1_34_t'),
     CONMAS_RATE_SCALE: z.enum(['percent', 'fraction']).default('percent'),
   })
   .superRefine((c, ctx) => {
+    if (c.NODE_ENV === 'production' && c.TRUST_PROXY.trim().toLowerCase() === 'true')
+      ctx.addIssue({ code: 'custom', path: ['TRUST_PROXY'], message: 'Gunakan loopback, subnet proxy yang dikenal, atau false di production.' });
     if (c.NODE_ENV === 'production' && !c.COOKIE_SECURE && !c.ALLOW_INSECURE_COOKIE)
       ctx.addIssue({ code: 'custom', path: ['COOKIE_SECURE'], message: 'COOKIE_SECURE=false di production butuh exception tercatat (ALLOW_INSECURE_COOKIE=true)' });
   });

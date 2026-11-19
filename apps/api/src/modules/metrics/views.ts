@@ -1,5 +1,5 @@
 import {
-  SHIFT_START_HOURS, metric, shiftStartsOf, type Metric,
+  MACHINE_PERSONNEL_ROLES, SHIFT_START_HOURS, metric, shiftStartsOf, type Metric,
   type DailyRatesView, type LossGroup, type MachineDetailView, type MachineListView, type MachineProduction, type MachineUtilization, type ProductionTotals, type ProductionView, type ScrapMaterialRow, type ScrapPartRow, type ScrapPeriodRow, type ScrapView, type SalesPartRow, type SalesPeriodRow, type SalesView,
   type SettingsBody, type StopCategoryRef, type StopTimeView, type UtilizationTotals, type UtilizationView,
 } from '@mpd/contracts';
@@ -48,9 +48,10 @@ const filterShift = (rs: SourceRecord[], shift: string | null) => (shift ? rs.fi
 function prodTotals(rs: SourceRecord[], resolve: Resolve): ProductionTotals {
   const plan = sum(rs, (r) => r.plan ?? 0), actual = sum(rs, (r) => r.actual ?? 0);
   const reject = sumNullable(rs.map((r) => r.ngQty));
+  const planReported = rs.some((r) => r.plan !== null), actualReported = rs.some((r) => r.actual !== null);
   return {
-    plan, actual, gross: sumNullable(rs.map((r) => r.gross)), reject,
-    bekidoritsu: bekidoritsu(actual, plan), deviation: actual - plan, ipr: ipr(reject, actual),
+    plan, actual, planReported, actualReported, gross: sumNullable(rs.map((r) => r.gross)), reject,
+    bekidoritsu: planReported && actualReported ? bekidoritsu(actual, plan) : metric(null, 'Plan atau actual belum tersedia'), deviation: actual - plan, ipr: ipr(reject, actual),
     stopMinutes: sum(rs, (r) => sum(eventsOf(r, resolve).loss, (e) => e.minutes)),
   };
 }
@@ -73,10 +74,12 @@ export function buildProduction(records: SourceRecord[], prev: SourceRecord[] | 
       achievement: beki === null ? 'unknown' : beki < s.prob.beki ? 'attention' : 'within',
     };
   });
+  const byDay = groupBy(rs, (r) => r.date);
   const daily = datesIn(range.from, range.to).map((date) => {
-    const d = rs.filter((r) => r.date === date);
+    const d = byDay.get(date) ?? [];
     const plan = sum(d, (r) => r.plan ?? 0), actual = sum(d, (r) => r.actual ?? 0);
-    return { date, plan, actual, bekidoritsu: bekidoritsu(actual, plan) };
+    const planReported = d.some((r) => r.plan !== null), actualReported = d.some((r) => r.actual !== null);
+    return { date, plan, actual, hasRecord: d.length > 0, planReported, actualReported, bekidoritsu: planReported && actualReported ? bekidoritsu(actual, plan) : metric(null, 'Plan atau actual belum tersedia') };
   });
   const groups = [...groupBy(rs.filter((r) => r.group), (r) => r.group!).entries()].sort().map(([group, list]) => {
     const plan = sum(list, (r) => r.plan ?? 0), actual = sum(list, (r) => r.actual ?? 0);
@@ -94,7 +97,8 @@ export function filterMachines(records: SourceRecord[], f: { status?: 'attention
     const latest = list.reduce((a, b) => (b.date > a.date ? b : a));
     if (q && !`mc ${mc} mc${mc} ${latest.productName ?? ''} ${latest.dpNo ?? ''}`.toLowerCase().includes(q)) return;
     if (f.status) {
-      const b = bekidoritsu(sum(list, (r) => r.actual ?? 0), sum(list, (r) => r.plan ?? 0)).value;
+      const reported = list.some((r) => r.plan !== null) && list.some((r) => r.actual !== null);
+      const b = reported ? bekidoritsu(sum(list, (r) => r.actual ?? 0), sum(list, (r) => r.plan ?? 0)).value : null;
       const st = b === null ? 'unknown' : b < s.prob.beki ? 'attention' : 'within';
       if (st !== f.status) return;
     }
@@ -234,6 +238,14 @@ export function hourlyOutput(rs: SourceRecord[], starts: readonly number[]): Mac
   return { available: true, hours: [...byHour.entries()].sort((a, b) => ((a[0] - origin + 24) % 24) - ((b[0] - origin + 24) % 24)).map(([hour, actual]) => ({ hour, plan: null, actual })) };
 }
 
+export function latestMachineRecord(records: SourceRecord[], machineNo: string, date: string): SourceRecord | null {
+  let latest: SourceRecord | null = null;
+  for (const record of records) {
+    if (record.machineNo === machineNo && record.date === date && (!latest || record.shift > latest.shift)) latest = record;
+  }
+  return latest;
+}
+
 export function buildMachineDetail(machineNo: string, date: string, records: SourceRecord[], adj: { prev: string | null; next: string | null }, resolve: Resolve, s: SettingsBody): MachineDetailView {
   const rs = records.filter((r) => r.machineNo === machineNo && r.date === date);
   const starts = shiftStartsOf(s);
@@ -261,17 +273,19 @@ export function buildMachineDetail(machineNo: string, date: string, records: Sou
   allEv.forEach(({ e }) => e.rejects.forEach((q, n) => rej.set(n, (rej.get(n) ?? 0) + q)));
   let pareto = [...rej.entries()].map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty);
   if (pareto.length > 5) pareto = [...pareto.slice(0, 4), { name: 'Others', qty: sum(pareto.slice(4), (x) => x.qty) }];
-  const latest = rs.length ? rs.reduce((a, b) => (Number(b.shift) > Number(a.shift) ? b : a)) : null;
+  const latest = latestMachineRecord(rs, machineNo, date);
   return {
     machineNo, date, prevDate: adj.prev, nextDate: adj.next, hasRecord: rs.length > 0,
     header: {
       dpNo: latest?.dpNo ?? null, productName: latest?.productName ?? null, poNo: latest?.poNo ?? null, cavity: latest?.cavity ?? null,
       ctPlan: metric(null, 'CT plan belum tersedia di sumber'), ctActual: metric(latest?.ctActual ?? null, 'CT actual kosong'),
     },
-    personnel: [
-      { role: 'leader', nik: latest?.personnel.leader ?? null }, { role: 'cell', nik: latest?.personnel.cell ?? null },
-      { role: 'technician', nik: latest?.personnel.technician ?? null }, { role: 'operator', nik: latest?.personnel.operator ?? null },
-    ],
+    personnelShift: latest?.shift ?? null,
+    personnel: MACHINE_PERSONNEL_ROLES.map((role) => ({
+      role,
+      nik: latest?.personnel[role] ?? null,
+      name: s.md.pic ? latest?.personnelNames?.[role] ?? null : null,
+    })),
     shifts,
     totals: { plan: t.plan, actual: t.actual, gross: t.gross, reject: t.reject, deviation: t.deviation, ipr: t.ipr, stopMinutes: t.stopMinutes, bekidoritsu: t.bekidoritsu, oee: conmasRates(rs).oee },
     stops: stops.map((e) => ({ shift: e.shift, startMinuteOfDay: e.startMinuteOfDay, time: `${pad(Math.floor(e.startMinuteOfDay / 60))}:00`, minutes: e.minutes, categoryId: e.cat.id, category: e.cat.short, color: e.cat.color, detail: e.detail })),
@@ -308,17 +322,17 @@ export function buildSales(records: SourceRecord[], prices: ReadonlyMap<string, 
   const line = (r: SourceRecord) => {
     const qty = r.actual !== null && r.actual > 0 ? r.actual : 0;
     const s = salesValue(r.actual, priceOf(r));
-    return s.value === null ? { sales: 0, qty, uncovered: qty } : { sales: s.value, qty, uncovered: 0 };
+    return s.value === null ? { sales: 0, qty, uncovered: qty, valued: false } : { sales: s.value, qty, uncovered: 0, valued: true };
   };
   const roll = (key: string, list: SourceRecord[]): SalesPeriodRow => {
     const l = list.map(line);
-    return { key, sales: sum(l, (x) => x.sales), goodQty: sum(l, (x) => x.qty), uncoveredQty: sum(l, (x) => x.uncovered) };
+    return { key, hasValuation: l.some((x) => x.valued), sales: sum(l, (x) => x.sales), goodQty: sum(l, (x) => x.qty), uncoveredQty: sum(l, (x) => x.uncovered) };
   };
   const byDate = groupBy(rs, (r) => r.date);
   const byMonthMap = groupBy(rs, (r) => r.date.slice(0, 7));
   const all = rs.map(line);
   const goodQty = sum(all, (x) => x.qty), uncoveredQty = sum(all, (x) => x.uncovered), coveredQty = goodQty - uncoveredQty, totalRp = sum(all, (x) => x.sales);
-  const total = coveredQty > 0 ? metric(totalRp) : metric(null, goodQty > 0 ? 'Harga/PCS belum diisi di Master Data untuk part pada periode ini' : 'Tidak ada output pada periode ini');
+  const total = all.some((x) => x.valued) ? metric(totalRp) : metric(null, goodQty > 0 ? 'Harga/PCS belum diisi di Master Data untuk part pada periode ini' : 'Tidak ada output pada periode ini');
   const byPart: SalesPartRow[] = [...groupBy(rs, (r) => partKey(r.dpNo) ?? '—').entries()].map(([k, list]) => {
     const qty = sum(list.map(line), (x) => x.qty);
     const price = k === '—' ? null : prices.get(k) ?? null;
@@ -364,7 +378,7 @@ export function buildScrap(records: SourceRecord[], parts: ReadonlyMap<string, S
   const roll = (key: string, list: SourceRecord[]): ScrapPeriodRow => {
     const ls = list.map(line), a = agg(ls);
     const mats = [...groupBy(ls.filter((l) => l.value !== null), (l) => l.code).entries()].map(([code, g]) => ({ code, value: sum(g, (l) => l.value!) })).sort((x, y) => y.value - x.value);
-    return { key, scrapGram: a.gram, scrapValue: a.value, unvaluedGram: a.unvaluedGram, ratio: ratioOf(a), materials: mats };
+    return { key, hasValuation: a.haveValue, scrapGram: a.gram, scrapValue: a.value, unvaluedGram: a.unvaluedGram, ratio: ratioOf(a), materials: mats };
   };
   const all = rs.map(line), tot = agg(all);
   const byDate = groupBy(rs, (r) => r.date), byMonthMap = groupBy(rs, (r) => r.date.slice(0, 7));

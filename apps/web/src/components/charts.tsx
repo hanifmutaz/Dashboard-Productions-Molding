@@ -11,7 +11,7 @@ export interface ChartOpts {
   line?: { name: string; col: string; vals: (number | null)[]; fmt?: (v: number) => string; axis?: 'right'; max?: number };
   target?: number; targetLbl?: string;
   h?: number; bw?: number; L?: number; rot?: boolean; lw?: number;
-  off?: number[]; sel?: number | null; partial?: number | null;
+  off?: number[]; offLabel?: string; sel?: number | null; partial?: number | null;
   disabled?: (i: number) => boolean; onClick?: (i: number) => void;
   tipT?: (i: number) => string; tipX?: (i: number) => TipContent['rows'];
   yFmt?: (v: number) => string; vFmt?: (v: number) => string; yTitle?: string; yMax?: number; aria: string;
@@ -37,6 +37,7 @@ export function Chart(o: ChartOpts) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const { show, hide } = useTip();
   const pid = useId().replace(/:/g, '');
+  const [showData, setShowData] = useState(false);
   const n = o.labels.length;
   if (!n) return <div className="chw" ref={ref}><div className="empty">No data for this selection</div></div>;
   const W = Math.max(300, width || 900), H = o.h ?? 260, L = o.L ?? 52, R = o.line?.axis === 'right' ? 52 : 14, Tp = 16, B = o.rot ? 74 : 28;
@@ -51,7 +52,7 @@ export function Chart(o: ChartOpts) {
   const yr = (v: number) => H - B - (Math.min(rMax, v) / rMax) * (H - Tp - B);
   const yFmt = o.yFmt ?? kf, vFmt = o.vFmt ?? fmt, lFmt = o.line?.fmt ?? f1;
   const step = Math.max(1, Math.ceil(n / Math.max(1, Math.floor((W - L - R) / (o.rot ? 22 : (o.lw ?? 56))))));
-  const grid: ReactNode[] = [], hits: ReactNode[] = [], bars: ReactNode[] = [], pts: [number, number][] = [];
+  const grid: ReactNode[] = [], hits: ReactNode[] = [], bars: ReactNode[] = [], pts: [number, number, number][] = [];
   for (let k = 0; k <= 4; k++) {
     const v = (mx * k) / 4, yy = y(v);
     grid.push(<line key={`g${k}`} className="gl" x1={L} x2={W - R} y1={yy} y2={yy} />, <text key={`t${k}`} x={L - 8} y={yy + 4} textAnchor="end">{yFmt(v)}</text>);
@@ -71,7 +72,7 @@ export function Chart(o: ChartOpts) {
     hits.push(
       <rect key={`h${i}`} className={`hit${o.sel === i ? ' sel' : ''}${dis ? ' dis' : ''}`} x={x} y={Tp} width={bw} height={H - Tp - B}
         onPointerMove={(e: PointerEvent) => !dis && show(e, tipFor(i))} onPointerLeave={hide}
-        {...(click && !dis ? { onClick: () => click(i), role: 'button', tabIndex: 0, 'aria-label': lb, onKeyDown: (e: KeyboardEvent) => e.key === 'Enter' && click(i) } : {})} />,
+        {...(click && !dis ? { onClick: () => click(i), role: 'button', tabIndex: 0, 'aria-label': lb, onKeyDown: (e: KeyboardEvent) => ['Enter', ' '].includes(e.key) && (e.preventDefault(), click(i)) } : {})} />,
     );
     const seg: { x: number; y: number; w: number; h: number; fill: string | undefined; rx?: number }[] = [];
     if (o.stack) {
@@ -97,7 +98,7 @@ export function Chart(o: ChartOpts) {
       if (o.partial === i) bars.push(<rect key={`p${i}-${j}`} className="mtd" x={r.x} y={r.y} width={r.w} height={r.h} fill={`url(#mtdH-${pid})`} rx={r.rx} pointerEvents="none" />);
     });
     const lv = o.line?.vals[i];
-    if (lv != null) pts.push([x + bw / 2, rMax ? yr(lv) : y(lv)]);
+    if (lv != null) pts.push([x + bw / 2, rMax ? yr(lv) : y(lv), i]);
     if (i % step === 0) {
       const tx = x + bw / 2, st = o.sel === i ? { fill: 'var(--primary)', fontWeight: 700 } : undefined;
       grid.push(o.rot
@@ -108,7 +109,7 @@ export function Chart(o: ChartOpts) {
   (o.off ?? []).forEach((i) => {
     const x = L + i * bw;
     grid.push(<rect key={`o${i}`} x={x} y={Tp} width={bw} height={H - Tp - B} fill="var(--line-2)" opacity={0.28} pointerEvents="none" />,
-      <text key={`ot${i}`} x={x + bw / 2} y={Tp + 11} textAnchor="middle" style={{ fontSize: 'var(--s-size-12)', fill: 'var(--faint)' }} pointerEvents="none">off</text>);
+      <text key={`ot${i}`} x={x + bw / 2} y={Tp + 11} textAnchor="middle" style={{ fontSize: 'var(--s-size-12)', fill: 'var(--faint)' }} pointerEvents="none">{o.offLabel ?? 'off'}</text>);
   });
   grid.push(<line key="ax" className="ax" x1={L} x2={W - R} y1={H - B} y2={H - B} />);
   let target: ReactNode = null;
@@ -119,7 +120,7 @@ export function Chart(o: ChartOpts) {
   }
   const line = pts.length && o.line ? (
     <g pointerEvents="none">
-      <path className="ln" pathLength={1} d={pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ')} fill="none" stroke={o.line.col} strokeWidth={2.2} strokeLinejoin="round" />
+      <path className="ln" pathLength={1} d={pts.map((p, i) => (i && pts[i - 1]![2] + 1 === p[2] ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ')} fill="none" stroke={o.line.col} strokeWidth={2.2} strokeLinejoin="round" />
       {pts.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r={3} fill="var(--surface)" stroke={o.line!.col} strokeWidth={2} />)}
     </g>
   ) : null;
@@ -131,6 +132,18 @@ export function Chart(o: ChartOpts) {
         )}
         {grid}{hits}{bars}{target}{line}
       </svg>
+      <details className="chart-data" onToggle={(e) => setShowData(e.currentTarget.open)}>
+        <summary className="lnk">Lihat angka grafik</summary>
+        {showData && <div className="tw"><table aria-label={o.aria}><thead><tr><th>Periode</th><th>Angka</th></tr></thead>
+          <tbody>{o.labels.map((label, i) => {
+            const entry = tipFor(i);
+            return <tr key={i}><th scope="row">{o.onClick && !o.disabled?.(i)
+              ? <button type="button" className="lnk" onClick={() => o.onClick?.(i)}>{entry.title || label}</button>
+              : entry.title || label}</th>
+              <td>{entry.rows?.length ? entry.rows.map((r, j) => <div key={j}>{r.label}: {r.value}</div>) : '—'}</td></tr>;
+          })}</tbody>
+        </table></div>}
+      </details>
     </div>
   );
 }

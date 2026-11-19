@@ -44,29 +44,35 @@ export function LoginPage() {
   );
 }
 
+function ProblemPage({ title, children, action, alert }: { title: string; children: ReactNode; action: ReactNode; alert?: boolean }) {
+  return (
+    <section className="view on"><div className="content"><div className="card">
+      <div className="problem-message" role={alert ? 'alert' : undefined}>
+        <h1 className="authh">{title}</h1>
+        {children}
+        <div className="problem-actions">{action}</div>
+      </div>
+    </div></div></section>
+  );
+}
+
 export function ForbiddenPage() {
-  return (
-    <section className="view on"><div className="content"><div className="card"><div className="hold">
-      <h3>Akses ditolak</h3><p>Role Anda tidak memiliki izin untuk halaman ini. Hubungi admin bila Anda memerlukan akses.</p>
-      <p style={{ marginTop: 'var(--s-size-14)' }}><Link className="btn" to="/">Kembali ke dashboard</Link></p>
-    </div></div></div></section>
-  );
+  return <ProblemPage title="Akses ditolak" action={<Link className="btn" to="/">Kembali ke dashboard</Link>}>
+    <p>Hubungi admin jika Anda memerlukan izin untuk halaman ini.</p>
+  </ProblemPage>;
 }
+
 export function NotFoundPage() {
-  return (
-    <section className="view on"><div className="content"><div className="card"><div className="hold">
-      <h3>Halaman tidak ditemukan</h3><p>Alamat yang Anda buka tidak tersedia.</p>
-      <p style={{ marginTop: 'var(--s-size-14)' }}><Link className="btn" to="/">Kembali ke dashboard</Link></p>
-    </div></div></div></section>
-  );
+  return <ProblemPage title="Halaman tidak ditemukan" action={<Link className="btn" to="/">Kembali ke dashboard</Link>}>
+    <p>Periksa alamat atau kembali ke dashboard.</p>
+  </ProblemPage>;
 }
+
 export function ErrorPanel({ error }: { error: unknown }) {
   const rid = error instanceof ApiFailure ? error.requestId : undefined;
-  return (
-    <section className="view on"><div className="content"><div className="card"><div className="hold" role="alert">
-      <h3>Terjadi kesalahan</h3><p>Halaman tidak dapat ditampilkan. Muat ulang; bila berulang, hubungi admin{rid ? <> dengan Request ID <span className="mono">{rid}</span></> : null}.</p>
-      <p style={{ marginTop: 'var(--s-size-14)' }}><button className="btn" type="button" onClick={() => location.reload()}>Muat ulang</button></p>
-    </div></div></div></section>
-  );
+  return <ProblemPage title="Terjadi kesalahan" alert action={<button className="btn pri" type="button" onClick={() => location.reload()}>Muat ulang</button>}>
+    <p>Halaman belum bisa dimuat. Jika berulang, hubungi admin.</p>
+    {rid && <p className="mono">Request ID · {rid}</p>}
+  </ProblemPage>;
 }
 export { Frame as AuthFrame };

@@ -4,13 +4,13 @@ import { useQuery } from '@tanstack/react-query';
 import type { MachineDetailView, Metric, Settings, ViewDataEnvelope } from '@mpd/contracts';
 import { api, qs } from '../../lib/api';
 import { useReportSource } from '../../lib/filters';
+import { shiftStarts } from '../../lib/period';
 import { cls, type TargetKey } from '../../lib/status';
 import { hh, timeAgo, tokenColor } from '../../lib/format';
 import { useWidth } from '../../components/charts';
 import mdCss from './machine-detail.css?inline';
 
-/* Machine Detail (normal + iPad/kiosk). Rendered inside a Shadow DOM exactly like mockup v1.10 so its
- * component CSS cannot collide with the dashboard CSS; tokens are inherited through the host. */
+/* Keep Machine Detail styles inside the Shadow DOM in dashboard and kiosk modes. */
 
 function ShadowHost({ className, source, phw, children }: { className: string; source: string; phw: number; children: ReactNode }) {
   const host = useRef<HTMLDivElement>(null);
@@ -27,15 +27,26 @@ function ShadowHost({ className, source, phw, children }: { className: string; s
     setRoot(sr);
   }, []);
   return (
-    <div id="mdHost" ref={host} className={className} data-source={source} style={{ ['--phw' as string]: phw }}>
+    <div id="mdHost" ref={host} className={className} data-source={source} style={{ ['--photo-width' as string]: phw + 'px' }}>
       {root && createPortal(children, root)}
     </div>
   );
 }
 
-const PAGES = ['Ringkasan', 'Shift & stop time', 'Trend & analisa'];
-const PERSON = <svg viewBox="0 0 100 110" fill="currentColor"><circle cx="50" cy="38" r="20" /><path d="M8 110c0-25 19-42 42-42s42 17 42 42z" /></svg>;
-const ROLE = { leader: 'Leader', cell: 'Cell leader', technician: 'Technician', operator: 'Operator' } as const;
+const PAGES = ['Ringkasan', 'Shift & Stop', 'Trend & Analisa'];
+const ROLE = { leader: 'Leader', cell: 'Cell Leader', technician: 'Teknisi', operator: 'Operator' } as const;
+
+function PersonnelPhoto({ src, name }: { src?: string; name?: string }) {
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  return (
+    <span className="ph" aria-hidden="true">
+      {!loaded && (name?.split(/\s+/).slice(0, 2).map((part) => Array.from(part)[0]).join('').toLocaleUpperCase() || '—')}
+      {src && !failed && <img src={src} alt="" onLoad={() => setLoaded(true)}
+        onError={() => { setFailed(true); setLoaded(false); }} style={{ opacity: loaded ? 1 : 0 }} />}
+    </span>
+  );
+}
 
 interface Props {
   machineNo: string;
@@ -55,9 +66,8 @@ export function MachineDashboard(p: Props) {
   const s = p.settings;
   const q = useQuery({
     queryKey: ['machine-detail', p.machineNo, p.date],
-    queryFn: () => api.get<ViewDataEnvelope<MachineDetailView>>(`/api/v1/machine-detail/${encodeURIComponent(p.machineNo)}?${qs({ date: p.date })}`),
+    queryFn: ({ signal }) => api.get<ViewDataEnvelope<MachineDetailView>>(`/api/v1/machine-detail/${encodeURIComponent(p.machineNo)}?${qs({ date: p.date })}`, signal),
     refetchInterval: s.data.refresh * 60_000,
-    placeholderData: (prev) => prev,
   });
   useReportSource(q.data, q.isPending, q.isError);
   const env = q.data, x = env?.data ?? null;
@@ -68,225 +78,377 @@ export function MachineDashboard(p: Props) {
   const [pg, setPg] = useState(enabled[0] ?? 0);
   const [play, setPlay] = useState(p.ipad && s.md.autoplay);
   const [rem, setRem] = useState(s.md.rot);
+  const deadline = useRef(0);
   useEffect(() => setPlay(p.ipad && s.md.autoplay), [p.ipad, s.md.autoplay]);
-  const go = (i: number) => { setPg((i + 3) % 3); setRem(s.md.rot); };
+  const go = (i: number) => {
+    setPg((i + 3) % 3);
+    deadline.current = Date.now() + s.md.rot * 1000;
+    setRem(s.md.rot);
+  };
   const next = () => { for (let k = 1; k <= 3; k++) { const j = (pg + k) % 3; if (enabled.includes(j)) return go(j); } };
   useEffect(() => {
     if (!play) return;
-    const iv = setInterval(() => setRem((r) => r - 0.1), 100);
+    deadline.current = Date.now() + s.md.rot * 1000;
+    const iv = setInterval(() => setRem((deadline.current - Date.now()) / 1000), 1000);
     return () => clearInterval(iv);
-  }, [play]);
-  useEffect(() => { if (rem <= 0) next(); });  
+  }, [play, s.md.rot]);
+  useEffect(() => { if (rem <= 0) next(); });
   // Keep the iPad screen awake in iPad / kiosk mode (Screen Wake Lock, iPadOS 16.4+).
   useEffect(() => {
     if (!p.ipad || !('wakeLock' in navigator)) return;
     let lock: WakeLockSentinel | null = null;
-    const req = () => { navigator.wakeLock.request('screen').then((l) => { lock = l; }, () => undefined); };
+    let active = true;
+    const req = () => {
+      if (lock && !lock.released) return;
+      void navigator.wakeLock.request('screen').then((l) => {
+        if (!active) { void l.release(); return; }
+        lock = l;
+      }, () => undefined);
+    };
     req();
     const vis = () => document.visibilityState === 'visible' && req();
     document.addEventListener('visibilitychange', vis);
-    return () => { document.removeEventListener('visibilitychange', vis); void lock?.release(); };
+    return () => { active = false; document.removeEventListener('visibilitychange', vis); void lock?.release(); };
   }, [p.ipad]);
-  const touchX = useRef<number | null>(null);
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const stage = useRef<HTMLElement>(null);
+  const stopTab = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (stage.current) stage.current.scrollTop = 0;
+  }, [pg]);
 
   const blocked = q.isPending || env?.state === 'unavailable' || q.isError;
-  const source = q.isPending ? 'loading' : q.isError || env?.state === 'unavailable' ? 'down' : env?.freshness === 'stale' ? 'stale' : 'ok';
-  const srcLabel = q.isPending ? 'Memuat data…' : q.isError ? 'Gagal memuat data' : env?.state === 'unavailable' ? 'Sumber tidak tersedia'
-    : env?.freshness === 'stale' ? `Data tertunda · ${timeAgo(env.sourceUpdatedAt)}` : env?.freshness === 'current' ? `Sumber normal · ${timeAgo(env.sourceUpdatedAt)}` : `Histori · update ${timeAgo(env?.sourceUpdatedAt ?? null)}`;
+  const source = q.isPending ? 'loading' : blocked ? 'down' : env?.freshness === 'stale' ? 'stale' : x && !x.hasRecord ? 'empty' : 'ok';
+  const sourceLabel = source === 'loading' ? 'Memuat data…' : q.isError ? 'Gagal memuat data' : source === 'down' ? 'Sumber tidak tersedia'
+    : source === 'stale' ? 'Data tertunda' : source === 'empty' ? 'Tidak ada data' : env?.freshness === 'current' ? 'Data tersedia' : 'Histori';
+  const sourceTime = env?.sourceUpdatedAt ? `Update ${timeAgo(env.sourceUpdatedAt)}` : null;
   const dt = x ? new Date(x.date + 'T00:00:00') : null;
+  const partCode = (label: 'DP' | 'PO', value: string | null) =>
+    value?.toUpperCase().startsWith(label) ? value : label + ' ' + (value ?? '—');
   const MST = (v: number | null, k: TargetKey) => {
     const c = cls(v, k, s);
-    return c === 'ok' ? { c: 'var(--good)', bg: 'var(--good-bg)', t: 'On target' } : c === 'mid' ? { c: 'var(--warn)', bg: 'var(--warn-bg)', t: 'Di bawah target' } : c === 'lo' ? { c: 'var(--bad)', bg: 'var(--bad-bg)', t: 'Jauh di bawah target' } : { c: 'var(--muted)', bg: 'var(--surface)', t: 'Tidak tersedia' };
+    return c === 'ok' ? { c: 'var(--good)', t: 'Mencapai target' } : c === 'mid' ? { c: 'var(--warn)', t: 'Di bawah target' } : c === 'lo' ? { c: 'var(--bad)', t: 'Jauh di bawah target' } : { c: 'var(--muted)', t: 'Tidak tersedia' };
   };
-  const meter = (v: number | null, k: TargetKey, c = '') => (
-    <div className={`meter ${c}`}><i style={{ width: `${Math.min(100, v ?? 0)}%`, background: MST(v, k).c }} /><b style={{ left: `${Math.min(100, s.tgt[k])}%` }} /></div>
-  );
+  const meter = (v: number | null, k: TargetKey, c = '') => {
+    const scale = c === 'score-meter' ? Math.max(105, v ?? 0, s.tgt[k]) : 100;
+    return (
+      <div className={`meter ${c}`} aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(1, (v ?? 0) / scale)) * 100}%`, background: c === 'score-meter' ? 'var(--score-fill)' : MST(v, k).c }} /><b style={{ left: `${Math.min(1, s.tgt[k] / scale) * 100}%` }} /></div>
+    );
+  };
   const offMsg = q.isPending ? <><b>Memuat data mesin</b><span>Angka disembunyikan sampai pemuatan selesai.</span></>
     : q.isError || env?.state === 'unavailable' ? <><b>Sumber data tidak tersedia</b><span>Angka disembunyikan, bukan nol produksi. {env?.notices.map((n) => n.message).join(' ')}</span></>
     : x && !x.hasRecord ? <><b>MC {p.machineNo} · belum ada data produksi</b><span>Tidak ditemukan catatan produksi pada {dt?.toLocaleDateString('id-ID', { dateStyle: 'full' })}. Ini bukan konfirmasi bahwa mesin tidak dijadwalkan.</span></>
     : null;
+  const ipadLabel = p.ipad ? 'Keluar mode iPad' : 'Mode iPad';
+  const rotationLabel = play ? 'Jeda rotasi' : 'Putar rotasi';
 
   return (
-    <ShadowHost className={p.ipad ? 'ipad' : ''} source={source} phw={{ s: 4.8, m: 6.4, l: 7.8 }[s.md.photo]}>
+    <ShadowHost className={p.ipad ? 'ipad' : ''} source={source} phw={{ s: 68, m: 84, l: 100 }[s.md.photo]}>
       <div className="app">
         <header className="top">
-          <div className="logo"><img src="/hrs-logo.png" alt="HRS · Hirose Electric" /></div>
-          {p.onBack && !p.locked && (
-            <button className="back" type="button" aria-label="Kembali ke daftar mesin" onClick={p.onBack}><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" /></svg><span className="bl">Semua mesin</span></button>
-          )}
-          {!p.locked && p.machines && p.onMachine && (
-            <div className="msw">
-              <button type="button" aria-label="Mesin sebelumnya" onClick={() => { const m = p.machines!, i = m.indexOf(p.machineNo); p.onMachine!(m[(i - 1 + m.length) % m.length]!); }}><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" /></svg></button>
-              <select aria-label="Pilih mesin" value={p.machineNo} onChange={(e) => p.onMachine!(e.target.value)}>{p.machines.map((m) => <option key={m} value={m}>MC {m}</option>)}</select>
-              <button type="button" aria-label="Mesin berikutnya" onClick={() => { const m = p.machines!, i = m.indexOf(p.machineNo); p.onMachine!(m[(i + 1) % m.length]!); }}><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6" /></svg></button>
+          <div className="topin frame">
+            <div className="brand">
+              <span className="logo"><img src="/hrs-logo.png" alt="HRS" /></span>
+              <div className="product-title">Molding Dashboard<strong>Machine Detail</strong></div>
             </div>
-          )}
-          <div className="mh">
-            {p.locked && <div className="mct"><span>Mesin</span><b>MC {p.machineNo}</b></div>}
-            <div className="mpn"><span>Part no.</span><b>{x?.header.dpNo ?? '—'}</b></div>
-            <div className="mpm"><span>Part name</span><b style={{ fontFamily: 'var(--font)' }}>{x?.header.productName ?? '—'}</b></div>
-            <div className="mct"><span>CT plan / actual</span><b>{dec(x?.header.ctPlan.value)} / {dec(x?.header.ctActual.value)} s</b></div>
-            <div className="srctag" role="status" aria-live="polite" aria-atomic="true">{srcLabel}</div>
+            <div className="top-tools">
+              {p.onBack && !p.ipad && !p.locked && (
+                <button className="display-btn icon-btn" type="button" aria-label="Kembali ke daftar mesin" title="Semua mesin" onClick={p.onBack}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" /></svg>
+                </button>
+              )}
+              {p.onIpad && !p.locked && (
+                <button className="display-btn icon-btn" type="button" aria-label={p.ipad ? ipadLabel : 'Mode iPad (layar penuh)'} title={ipadLabel}
+                  aria-pressed={p.ipad} onClick={() => p.onIpad!(!p.ipad)}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d={p.ipad ? 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5' : 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5'} />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
-          <div className="dsw">
-            <button type="button" aria-label="Hari sebelumnya" disabled={!x?.prevDate} onClick={() => x?.prevDate && p.onDate(x.prevDate)}><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" /></svg></button>
-            <div className="date">{dt ? <><b>{dt.toLocaleDateString('id-ID', { weekday: 'long' })}</b>{dt.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</> : '—'}</div>
-            <button type="button" aria-label="Hari berikutnya" disabled={!x?.nextDate} onClick={() => x?.nextDate && p.onDate(x.nextDate)}><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6" /></svg></button>
-          </div>
-          {p.onIpad && !p.locked && (
-            <button className="ipb" type="button" aria-label={p.ipad ? 'Keluar mode iPad' : 'Mode iPad (layar penuh)'} title={p.ipad ? 'Keluar mode iPad' : 'Mode iPad (layar penuh)'} onClick={() => p.onIpad!(!p.ipad)}>
-              <svg viewBox="0 0 24 24">{p.ipad ? <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /> : <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />}</svg>
-            </button>
-          )}
         </header>
-        <main className="stage" aria-busy={q.isPending}
-          onTouchStart={(e) => { touchX.current = e.touches[0]?.clientX ?? null; }}
-          onTouchEnd={(e) => { const t0 = touchX.current, t1 = e.changedTouches[0]?.clientX; if (t0 != null && t1 != null && Math.abs(t1 - t0) > 60) go(t1 < t0 ? pg + 1 : pg - 1); touchX.current = null; }}>
-          <div className="off" role="status" style={{ display: offMsg ? 'flex' : 'none' }}>{offMsg}</div>
-          {x && x.hasRecord && !blocked && (
-            <>
-              <Page1 on={pg === 0} x={x} s={s} idn={idn} dec={dec} MST={MST} meter={meter} />
-              <Page2 on={pg === 1} x={x} idn={idn} dec={dec} MST={MST} />
-              <Page3 on={pg === 2} x={x} s={s} dec={dec} MST={MST} meter={meter} />
-            </>
-          )}
+        <main ref={stage} className="stage" aria-busy={q.isPending}
+          onTouchStart={(e) => {
+            const t = e.touches[0];
+            swipeStart.current = t && !(e.target instanceof Element && e.target.closest('button, select, .tblwrap'))
+              ? { x: t.clientX, y: t.clientY } : null;
+          }}
+          onTouchCancel={() => { swipeStart.current = null; }}
+          onTouchEnd={(e) => {
+            const start = swipeStart.current, end = e.changedTouches[0];
+            swipeStart.current = null;
+            if (!start || !end) return;
+            const dx = end.clientX - start.x, dy = end.clientY - start.y;
+            if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) go(dx < 0 ? pg + 1 : pg - 1);
+          }}>
+          <div className={`workspace frame${pg === 1 ? ' stop-workspace' : ''}`}>
+            <header className="machine-head">
+              <div className="machine-identity">
+                <h1>MC {p.machineNo}</h1>
+                {x?.hasRecord && !blocked && (
+                  <div className="machine-part">
+                    <strong>{x.header.productName ?? '—'}</strong>
+                    <div className="machine-meta">
+                      <span>{partCode('DP', x.header.dpNo)}</span>
+                      <span>{partCode('PO', x.header.poNo)}</span>
+                      <span>{x.header.cavity == null ? 'Cavity —' : x.header.cavity + ' cavity'}</span>
+                      <span>CT {dec(x.header.ctActual.value)} dtk / plan {dec(x.header.ctPlan.value)} dtk</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="machine-controls">
+                {!p.locked && p.machines && p.onMachine && (
+                  <div className="control">
+                    <span>Mesin</span>
+                    <div className="picker">
+                      <button className="day-btn" type="button" aria-label="Mesin sebelumnya" onClick={() => { const m = p.machines!, i = m.indexOf(p.machineNo); p.onMachine!(m[(i - 1 + m.length) % m.length]!); }}>‹</button>
+                      <select aria-label="Pilih mesin" value={p.machineNo} onChange={(e) => p.onMachine!(e.target.value)}>{p.machines.map((m) => <option key={m} value={m}>MC {m}</option>)}</select>
+                      <button className="day-btn" type="button" aria-label="Mesin berikutnya" onClick={() => { const m = p.machines!, i = m.indexOf(p.machineNo); p.onMachine!(m[(i + 1) % m.length]!); }}>›</button>
+                    </div>
+                  </div>
+                )}
+                <div className="control">
+                  <span id="production-date-label">Tanggal produksi</span>
+                  <div className="picker">
+                    <button className="day-btn" type="button" aria-label="Hari sebelumnya" disabled={!x?.prevDate} onClick={() => x?.prevDate && p.onDate(x.prevDate)}>‹</button>
+                    <div className="date" role="group" aria-labelledby="production-date-label">{dt ? dt.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</div>
+                    <button className="day-btn" type="button" aria-label="Hari berikutnya" disabled={!x?.nextDate} onClick={() => x?.nextDate && p.onDate(x.nextDate)}>›</button>
+                  </div>
+                </div>
+                <div className="source" role="status" aria-live="polite" aria-atomic="true">
+                  <span>{sourceLabel}</span>
+                  {sourceTime && source !== 'empty' && <small>{sourceTime}</small>}
+                </div>
+              </div>
+            </header>
+            <nav className="tabs" aria-label="Panel Machine Detail">
+              {PAGES.map((name, i) => (
+                <button key={name} ref={i === 1 ? stopTab : undefined} type="button" onClick={() => go(i)}
+                  aria-current={i === pg ? 'page' : undefined}>{name}</button>
+              ))}
+            </nav>
+            <div className="panels">
+              {offMsg ? <div className="card off" role="status">{offMsg}</div> : x && (
+                <>
+                  <Page1 on={pg === 0} x={x} s={s} idn={idn} dec={dec} MST={MST} meter={meter}
+                    onStops={() => { go(1); stopTab.current?.focus(); }} />
+                  <Page2 key={x.machineNo + '/' + x.date} on={pg === 1} x={x} shifts={s.shifts} idn={idn} dec={dec} MST={MST} />
+                  <Page3 on={pg === 2} x={x} s={s} dec={dec} MST={MST} meter={meter} />
+                </>
+              )}
+            </div>
+            <footer className="foot">
+              <span>PT Hirose Electric Indonesia · Molding Division</span>
+              <div className="rotation">
+                {play && <span>Pindah panel dalam {Math.ceil(Math.max(0, rem))} dtk</span>}
+                <button className="day-btn" type="button" aria-label="Halaman sebelumnya" onClick={() => go(pg - 1)}>‹</button>
+                <button className="action icon-btn" type="button" aria-label={rotationLabel} title={rotationLabel} aria-pressed={play}
+                  onClick={() => { setPlay((running) => !running); setRem(s.md.rot); }}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d={play ? 'M8 5v14m8-14v14' : 'm9 5 11 7-11 7z'} />
+                  </svg>
+                </button>
+                <button className="day-btn" type="button" aria-label="Halaman berikutnya" onClick={() => go(pg + 1)}>›</button>
+              </div>
+            </footer>
+          </div>
         </main>
-        <footer className="kiosk">
-          <div className="tabs">
-            {PAGES.map((name, i) => (
-              <button key={name} type="button" className={`tab${i === pg ? ' on' : ''}${i < pg ? ' done' : ''}`} onClick={() => go(i)} aria-current={i === pg ? 'page' : undefined}>
-                <span className="tl2"><i>0{i + 1}</i>{name}</span>
-                <span className="pb"><b style={{ width: i === pg ? `${play ? ((s.md.rot - rem) / s.md.rot) * 100 : 100}%` : undefined }} /></span>
-              </button>
-            ))}
-          </div>
-          <div className="ctl">
-            <button type="button" aria-label="Halaman sebelumnya" onClick={() => go(pg - 1)}><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" /></svg></button>
-            <button id="playBtn" type="button" aria-label={play ? 'Jeda rotasi' : 'Putar rotasi'} onClick={() => { setPlay((x2) => !x2); setRem(s.md.rot); }}>
-              <svg viewBox="0 0 24 24">{play ? <><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></> : <path d="M7 4.5l13 7.5-13 7.5z" />}</svg>
-            </button>
-            <button type="button" aria-label="Halaman berikutnya" onClick={() => go(pg + 1)}><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6" /></svg></button>
-          </div>
-        </footer>
       </div>
     </ShadowHost>
   );
 }
 
 type Fmt = (n: number | null | undefined) => string;
-type Mst = (v: number | null, k: TargetKey) => { c: string; bg: string; t: string };
+type Mst = (v: number | null, k: TargetKey) => { c: string; t: string };
 type Meter = (v: number | null, k: TargetKey, c?: string) => ReactNode;
 
-function Page1({ on, x, s, idn, dec, MST, meter }: { on: boolean; x: MachineDetailView; s: Settings; idn: Fmt; dec: Fmt; MST: Mst; meter: Meter }) {
+function Page1({ on, x, s, idn, dec, MST, meter, onStops }: { on: boolean; x: MachineDetailView; s: Settings; idn: Fmt; dec: Fmt; MST: Mst; meter: Meter; onStops: () => void }) {
   const t = x.totals, pc = t.bekidoritsu.value, st = MST(pc, 'beki'), tg = s.tgt.beki;
   const longest = x.stops.reduce<MachineDetailView['stops'][number] | null>((a, r) => (!a || r.minutes > a.minutes ? r : a), null);
-  const fig = (v: string, u: string, l: string, c?: string) => <div className="fig"><div className="v n" style={c ? { color: c } : undefined}>{v}<span className="u">{u}</span></div><div className="t">{l}</div></div>;
+  const fig = (label: string, value: number | null, unit: string, color?: string) => (
+    <div><dt>{label}</dt><dd style={{ color }}>{idn(value)}{value !== null && <small>{unit}</small>}</dd></div>
+  );
   let cats = x.stopCategories;
   const tot = cats.reduce((a, c) => a + c.minutes, 0);
   if (cats.length > 6) { const rest = cats.slice(5); cats = [...cats.slice(0, 5), { categoryId: 'rest', name: `Lainnya (${rest.length} kategori)`, color: 's-paint-b3bbc2', minutes: rest.reduce((a, c) => a + c.minutes, 0) }]; }
-  const mx = cats[0]?.minutes ?? 1;
+  const mx = Math.max(1, ...cats.map((c) => c.minutes));
   return (
-    <section className={`page p1${on ? ' on' : ''}${s.md.pic ? '' : ' nopic'}`} inert={!on} aria-hidden={!on}>
+    <section className={`page p1${on ? ' on' : ''}`} inert={!on} aria-hidden={!on}>
       {s.md.pic && (
-        <div className="card ident">
-          {x.personnel.map((p) => (
-            <div className="pic" key={p.role} title={p.nik ? `NIK ${p.nik}` : undefined}>
-              <span className="ph">{PERSON}</span>
-              <span className="pt"><span className="role">{ROLE[p.role]}</span><span className="nm">{p.nik ? `NIK ${p.nik}` : '—'}</span></span>
+        <section className="card pic-card">
+          <header className="card-head"><h2>Personel mesin</h2>{x.personnelShift && <span className="panel-sub">Shift {x.personnelShift}</span>}</header>
+          <div className="ident">
+            {x.personnel.map((p) => {
+              const name = p.name?.trim() || undefined;
+              return (
+                <div className="pic" key={p.role}>
+                  <PersonnelPhoto key={[x.machineNo, x.date, p.role, p.nik, p.photoUrl].join('|')} src={p.photoUrl} name={name} />
+                  <span className="pt">
+                    <span className="role">{ROLE[p.role]}</span>
+                    <strong>{name ?? 'Nama belum tersedia'}</strong>
+                    <small>NIK {p.nik || '—'}</small>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+      <div className="p1main">
+        <section className="card output-summary">
+          <header className="card-head"><h2>Pencapaian output</h2><span className="panel-sub" title={pc === null ? t.bekidoritsu.reason ?? undefined : undefined}>{st.t}</span></header>
+          <div className="output-content">
+            <div className="output-score">
+              <span>Bekidoritsu</span>
+              <div className="bignum">{dec(pc)}{pc !== null && <small>%</small>}</div>
+              <div className="target-text">
+                Target {tg}%{pc !== null && <> · <b style={{ color: st.c }}>{pc >= tg ? '+' : '−'}{dec(Math.abs(pc - tg))} poin</b></>}
+                {meter(pc, 'beki', 'score-meter')}
+              </div>
+            </div>
+            <dl className="figs">
+              {fig('Plan', t.plan, 'pcs')}{fig('Actual', t.actual, 'pcs')}{fig('Gross', t.gross, 'pcs')}
+              {fig('Deviasi', t.deviation, 'pcs', t.deviation < 0 ? 'var(--bad)' : 'var(--good)')}{fig('Reject', t.reject, 'pcs', t.reject ? 'var(--bad)' : undefined)}{fig('IPR', t.ipr.value, 'ppm')}
+            </dl>
+          </div>
+        </section>
+        <section className="card stop-summary">
+          <header className="card-head"><h2>{longest ? 'Stop terlama' : 'Stop time'}</h2><button type="button" className="action" onClick={onStops}>Detail stop</button></header>
+          <div className="stop-content">
+            {longest && (
+              <div className="longest-stop">
+                <b>{idn(longest.minutes)} <small>menit</small></b>
+                <div><h3>{longest.detail || longest.category}</h3><p>{longest.time} · Shift {longest.shift}{longest.detail && ' · ' + longest.category}</p></div>
+              </div>
+            )}
+            {cats.length ? (
+              <>
+                <p className="panel-sub stop-total">Stop per kategori · total {idn(tot)} menit</p>
+                <div className="cats">
+                  {cats.map((c) => (
+                    <div className="cat" key={c.categoryId}>
+                      <span>{c.name}</span>
+                      <div className="tr" aria-hidden="true"><i style={{ width: `${(c.minutes / mx) * 100}%` }} /></div>
+                      <b>{idn(c.minutes)} mnt</b>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : <p className="none">Tidak ada catatan stop pada periode ini.</p>}
+          </div>
+        </section>
+      </div>
+      <section className="card shift-summary">
+        <header className="card-head"><h2>Ringkasan shift</h2></header>
+        <div className="shifts">
+          {x.shifts.map((sh) => (
+            <div className="sh" key={sh.shift}>
+              <div className="shift-top"><b>Shift {sh.shift}</b><span>{sh.time}</span></div>
+              <div className="shift-rate" style={{ color: MST(sh.bekidoritsu.value, 'beki').c }}>{dec(sh.bekidoritsu.value)}{sh.bekidoritsu.value !== null && '%'}</div>
+              <div className="shift-values">
+                <span>Plan<b>{idn(sh.plan)}{sh.plan !== null && ' pcs'}</b></span>
+                <span>Actual<b>{idn(sh.actual)}{sh.actual !== null && ' pcs'}</b></span>
+                <span>Stop<b>{idn(sh.stopMinutes)}{sh.stopMinutes !== null && ' mnt'}</b></span>
+              </div>
             </div>
           ))}
         </div>
-      )}
-      <div className="p1main">
-        <div className="left">
-          <div className="hero" style={{ background: st.bg }}>
-            <div>
-              <div className="lbl">Pencapaian output <span className="pill" style={{ background: st.c }}>{st.t}</span></div>
-              <div className="bignum" style={{ color: st.c }}>{dec(pc)}<small>%</small></div>
-            </div>
-            <div className="figs">
-              {fig(idn(t.plan), 'pcs', 'Output plan')}{fig(idn(t.actual), 'pcs', 'Output actual')}{fig(idn(t.gross), 'pcs', 'Output gross')}
-              {fig(idn(t.deviation), 'pcs', 'Deviasi dari plan', t.deviation < 0 ? 'var(--bad)' : 'var(--good)')}{fig(idn(t.reject), 'pcs', 'Quantity reject', t.reject ? 'var(--bad)' : undefined)}{fig(idn(t.ipr.value), 'ppm', 'IPR (PPM)')}
-            </div>
-            <div className="bar">{meter(pc, 'beki', 'lg')}<div className="mrow"><span>0%</span><span>Target <b>{tg}%</b> · {pc === null ? 'tidak tersedia' : pc >= tg ? <>lebih <b>{dec(pc - tg)} pt</b></> : <>kurang <b>{dec(tg - pc)} pt</b></>}</span><span>100%</span></div></div>
-            <div className={`attn${longest ? '' : ' quiet'}`}>{longest
-              ? <><b>Stop terlama tercatat</b><span>{longest.detail} · {longest.minutes} menit · {longest.time} · Shift {longest.shift} · {longest.category}</span></>
-              : <><b>Tidak ada catatan stop</b><span>Data stop kosong bukan bukti mesin berjalan normal.</span></>}</div>
-          </div>
-          <div className="shifts">
-            {x.shifts.map((sh) => (
-              <div className="card sh" key={sh.shift}>
-                <div className="hd"><b>Shift {sh.shift}</b><span>{sh.time}</span></div>
-                <div className="pc n" style={{ color: MST(sh.bekidoritsu.value, 'beki').c }}>{dec(sh.bekidoritsu.value)}<span className="u">%</span></div>
-                {meter(sh.bekidoritsu.value, 'beki')}
-                <div className="ft"><span><b>{idn(sh.actual)}</b> / {idn(sh.plan)}</span><span>stop <b>{sh.stopMinutes ?? '—'}</b> mnt</span></div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="card stop">
-          <div className="ttl"><span>Stop time pada tanggal terpilih</span><small>{x.stopCategories.length} kategori</small></div>
-          <div className="stopsum"><div className="n">{idn(tot)}<span className="u">menit</span></div><div className="side"><b>{dec(tot / 60)}</b> jam<br /><b>{x.stops.length}</b> kejadian</div></div>
-          <div className="stack">{cats.map((c) => <i key={c.categoryId} style={{ width: `${(c.minutes / (tot || 1)) * 100}%`, background: tokenColor(c.color) }} />)}</div>
-          {cats.length ? (
-            <div className="cats" style={{ gridTemplateRows: `repeat(${cats.length},minmax(calc(var(--u)*3.2),calc(var(--u)*4.6)))` }}>
-              {cats.map((c) => (
-                <div className="cat" key={c.categoryId}>
-                  <span className="nm"><i className="dot" style={{ background: tokenColor(c.color) }} />{c.name}</span>
-                  <span className="vl"><b>{c.minutes}</b> mnt <em>{Math.round((c.minutes / (tot || 1)) * 100)}%</em></span>
-                  <div className="tr"><i style={{ width: `${(c.minutes / mx) * 100}%`, background: tokenColor(c.color) }} /></div>
-                </div>
-              ))}
-            </div>
-          ) : <div className="none">Tidak ada catatan stop pada periode ini. Data kosong bukan konfirmasi mesin berjalan normal.</div>}
-        </div>
-      </div>
+      </section>
     </section>
   );
 }
 
-function Page2({ on, x, idn, dec, MST }: { on: boolean; x: MachineDetailView; idn: Fmt; dec: Fmt; MST: Mst }) {
-  const base = 6 * 60, L = x.stops, mxd = Math.max(1, ...L.map((r) => r.minutes));
-  const td = L.reduce((a, r) => a + r.minutes, 0), lg = L.reduce<(typeof L)[number] | null>((a, r) => (!a || r.minutes > a.minutes ? r : a), null);
-  const row = (l: string, fn: (s: MachineDetailView['shifts'][number]) => ReactNode, c?: string) => <tr className={c}><td>{l}</td>{x.shifts.map((s) => <td key={s.shift} className="r">{fn(s)}</td>)}</tr>;
+function Page2({ on, x, shifts, idn, dec, MST }: { on: boolean; x: MachineDetailView; shifts: Settings['shifts']; idn: Fmt; dec: Fmt; MST: Mst }) {
+  const [filter, setFilter] = useState<'all' | MachineDetailView['shifts'][number]['shift']>('all');
+  const starts = shiftStarts(shifts);
+  const activeShifts = x.shifts.filter((sh) => filter === 'all' || sh.shift === filter);
+  const events = x.stops.filter((r) => filter === 'all' || r.shift === filter);
+  const total = events.reduce((sum, r) => sum + r.minutes, 0);
+  const longest = events.reduce<MachineDetailView['stops'][number] | null>((a, event) => (!a || event.minutes > a.minutes ? event : a), null);
+  const clock = (minutes: number) => hh(Math.floor(minutes / 60)) + ':' + String(minutes % 60).padStart(2, '0');
+  const row = (label: string, value: (sh: MachineDetailView['shifts'][number]) => ReactNode) => (
+    <tr><th scope="row">{label}</th>{x.shifts.map((sh) => <td key={sh.shift} className="r">{value(sh)}</td>)}</tr>
+  );
   return (
     <section className={`page p2${on ? ' on' : ''}`} inert={!on} aria-hidden={!on}>
-      <div className="card tl">
-        <div className="ttl"><span>Stop time sepanjang hari</span><div className="legend">{x.stopCategories.slice(0, 6).map((c) => <span key={c.categoryId}><i className="dot" style={{ background: tokenColor(c.color) }} />{c.name}</span>)}</div></div>
-        <div>
-          <div className="tlhead">{x.shifts.map((s) => <div key={s.shift}><b>Shift {s.shift}</b>{s.time}<span className="n">{s.stopMinutes ?? '—'} mnt</span></div>)}</div>
-          <div className="track"><span /><span /><span />
-            {L.map((r, i) => <i key={i} title={`${r.time} · ${r.minutes} mnt · ${r.category} · ${r.detail}`} style={{ left: `${(((r.startMinuteOfDay - base + 1440) % 1440) / 14.4)}%`, width: `${r.minutes / 14.4}%`, background: tokenColor(r.color) }} />)}
-          </div>
-          <div className="axis">{Array.from({ length: 13 }, (_, j) => <span key={j} className={j % 4 === 0 ? 's' : ''} style={{ left: `${(j / 12) * 100}%` }}>{hh(6 + j * 2)}</span>)}</div>
+      <div className="card timeline-card">
+        <header className="card-head">
+          <h2>Timeline stop</h2>
+          <label className="filter">Shift
+            <select aria-label="Filter shift" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
+              <option value="all">Semua shift</option>
+              {x.shifts.map((sh) => <option key={sh.shift} value={sh.shift}>Shift {sh.shift}</option>)}
+            </select>
+          </label>
+        </header>
+        <div className="shift-timeline" style={{ ['--shift-count' as string]: activeShifts.length }}>
+          {activeShifts.map((sh) => {
+            const i = Number(sh.shift) - 1;
+            const start = starts[i]! * 60;
+            const end = starts[(i + 1) % starts.length]! * 60;
+            const duration = (end - start + 1440) % 1440;
+            return (
+              <div className="timeline-shift" key={sh.shift}>
+                <div className="timeline-label"><b>Shift {sh.shift}</b><span>{sh.stopMinutes == null ? '—' : <><strong>{idn(sh.stopMinutes)}</strong> menit stop</>}</span></div>
+                <div className="timeline-scale" role="img" aria-label={sh.time + ' · ' + (sh.stopMinutes === null ? 'Stop belum tersedia' : idn(sh.stopMinutes) + ' menit stop')}>
+                  {events.filter((r) => r.shift === sh.shift).map((r, index) => {
+                    const offset = (r.startMinuteOfDay - start + 1440) % 1440;
+                    if (offset >= duration || r.minutes <= 0) return null;
+                    return <i key={index} title={`${r.time} · ${r.minutes} mnt · ${r.category} · ${r.detail}`} style={{
+                      left: `${offset / duration * 100}%`, width: `${Math.min(r.minutes, duration - offset) / duration * 100}%`, background: tokenColor(r.color),
+                    }} />;
+                  })}
+                </div>
+                <div className="timeline-hours" aria-hidden="true"><span>{clock(start)}</span><span>{clock(start + duration / 2)}</span><span>{clock(end)}</span></div>
+              </div>
+            );
+          })}
         </div>
       </div>
       <div className="p2main">
-        <div className="card tblcard">
-          <div className="ttl"><span>Perbandingan shift</span></div>
+        <div className="card compare-card">
+          <header className="card-head"><h2>Perbandingan shift</h2></header>
           <div className="tblwrap"><table id="shiftTbl">
-            <thead><tr><th />{x.shifts.map((s) => <th key={s.shift} className="r">Shift {s.shift}</th>)}</tr></thead>
+            <thead><tr><th scope="col">Metrik</th>{x.shifts.map((sh) => <th scope="col" key={sh.shift} className="r">Shift {sh.shift}<small>{sh.time}</small></th>)}</tr></thead>
             <tbody>
-              {row('Output plan', (s) => idn(s.plan))}{row('Output actual', (s) => idn(s.actual))}{row('Output gross', (s) => idn(s.gross))}{row('Quantity reject', (s) => idn(s.reject))}
-              {row('IPR (PPM)', (s) => idn(s.ipr.value))}{row('Deviasi', (s) => <span style={{ color: (s.deviation ?? 0) < 0 ? 'var(--bad)' : 'var(--good)' }}>{idn(s.deviation)}</span>)}{row('Stop time (mnt)', (s) => s.stopMinutes ?? '—')}
-              {row('Pencapaian', (s) => <span style={{ color: MST(s.bekidoritsu.value, 'beki').c }}>{dec(s.bekidoritsu.value)}%</span>, 'hl')}
+              {row('Plan (pcs)', (sh) => idn(sh.plan))}
+              {row('Actual (pcs)', (sh) => idn(sh.actual))}
+              {row('Gross (pcs)', (sh) => idn(sh.gross))}
+              {row('Deviasi (pcs)', (sh) => <span style={sh.deviation === null ? undefined : { color: sh.deviation < 0 ? 'var(--bad)' : 'var(--good)' }}>{idn(sh.deviation)}</span>)}
+              {row('Reject (pcs)', (sh) => idn(sh.reject))}
+              {row('IPR (ppm)', (sh) => idn(sh.ipr.value))}
+              {row('Bekidoritsu', (sh) => <span style={{ color: MST(sh.bekidoritsu.value, 'beki').c }}>{dec(sh.bekidoritsu.value)}{sh.bekidoritsu.value !== null && '%'}</span>)}
+              {row('Stop (mnt)', (sh) => idn(sh.stopMinutes))}
             </tbody>
           </table></div>
         </div>
-        <div className="card tblcard">
-          <div className="ttl"><span>Detail stop time</span><small>{L.length} kejadian</small></div>
-          <div className="tblwrap">
-            <table id="stopTbl" style={L.length < 10 ? { height: 'auto' } : undefined}>
-              <thead><tr><th>Jam</th><th className="r">Durasi</th><th>Kategori</th><th>Keterangan</th></tr></thead>
-              <tbody>{L.map((r, i) => (
-                <tr key={i}><td className="n">{r.time}<span className="sb">S{r.shift}</span></td>
-                  <td className="r"><div className="dur"><i style={{ width: `calc(var(--u)*${((r.minutes / mxd) * 2.4).toFixed(2)})`, background: tokenColor(r.color) }} />{r.minutes}'</div></td>
-                  <td><span className="cat2"><i className="dot" style={{ background: tokenColor(r.color) }} />{r.category}</span></td><td className="d" title={r.detail}>{r.detail}</td></tr>
-              ))}</tbody>
-            </table>
-            <div className="none empty" style={{ display: L.length < 10 ? 'flex' : 'none' }}><span>{L.length ? `Hanya ${L.length} kejadian tercatat hari ini.` : 'Tidak ada stop time tercatat hari ini'}</span></div>
-          </div>
-          <div className="tsum"><div><span>Total tercatat</span><b>{td}</b> mnt</div><div><span>Rata-rata</span><b>{L.length ? Math.round(td / L.length) : 0}</b> mnt</div><div><span>Terlama</span><b>{lg ? lg.minutes : 0}</b> mnt</div><div><span>Jam terlama</span><b>{lg ? lg.time : '—'}</b></div></div>
+        <div className="card stop-events">
+          <header className="card-head">
+            <h2>Rincian stop</h2>
+            <span className="panel-sub">Total {idn(total)} mnt · {events.length} kejadian · rata-rata {events.length ? `${dec(total / events.length)} mnt` : '—'}</span>
+          </header>
+          {events.length ? (
+            <div className="tblwrap events-scroll" role="region" aria-label="Daftar kejadian stop" tabIndex={0}>
+              <table id="stopTbl">
+                <thead><tr><th scope="col">Jam</th><th scope="col">Kejadian</th><th scope="col" className="r">Durasi</th></tr></thead>
+                <tbody>{events.map((r, i) => (
+                  <tr key={i}>
+                    <th scope="row"><strong>{r.time}</strong><small>Shift {r.shift}</small></th>
+                    <td className="event-details"><strong>{r.detail || '—'}</strong><small><i className="dot" style={{ background: tokenColor(r.color) }} />{r.category}</small></td>
+                    <td className="r">{idn(r.minutes)} mnt</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          ) : <div className="none">{filter === 'all' ? 'Tidak ada kejadian stop tercatat pada tanggal ini.' : `Tidak ada kejadian stop tercatat di Shift ${filter}.`}</div>}
+          {longest && (
+            <dl className="stop-record">
+              <div><dt>Terlama</dt><dd>{idn(longest.minutes)} mnt</dd></div>
+              <div><dt>Jam terlama</dt><dd>{longest.time}</dd></div>
+            </dl>
+          )}
         </div>
       </div>
     </section>
@@ -298,23 +460,25 @@ function Page3({ on, x, s, dec, MST, meter }: { on: boolean; x: MachineDetailVie
   return (
     <section className={`page p3${on ? ' on' : ''}`} inert={!on} aria-hidden={!on}>
       <div className="card chartcard">
-        <div className="ttl"><span>Output per jam</span></div>
+        <header className="card-head"><h2>Output per jam</h2><span className="panel-sub">Actual · pcs</span></header>
         {x.hourly.available ? <HourlyChart hours={x.hourly.hours} /> : <div className="chart"><div className="none"><span>{x.hourly.reason}</span></div></div>}
       </div>
       <div className="p3b">
         <div className="card chartcard">
-          <div className="ttl"><span>Pareto reject</span><div className="legend"><span><i className="dot" style={{ background: 'var(--s-paint-9fb0b3)', borderRadius: 'var(--s-size-2)' }} />Qty reject (pcs)</span><span><i className="ln" style={{ borderColor: 'var(--plan)' }} />% kumulatif</span></div></div>
+          <header className="card-head"><h2>Pareto reject</h2><div className="legend"><span><i className="dot" style={{ background: 'var(--s-paint-8fa3a8)' }} />Qty reject (pcs)</span><span><i className="ln" />% kumulatif</span></div></header>
           <Pareto items={x.rejectPareto} paretoLine={s.disp.pareto} />
         </div>
         <div className="card kpis">
-          <div className="ttl"><span>Capaian terhadap target</span></div>
-          {([['Pencapaian output', x.totals.bekidoritsu, 'beki'], ['OEE', x.totals.oee, 'oee']] as const).map(([l, m, k]) => (
-            <div className="kpi" key={k}>
-              <div className="hd">{l} · target {s.tgt[k]}%<span>{gap(m, k)}</span></div>
-              <div className="big n" style={{ color: MST(m.value, k).c }}>{dec(m.value)}<small>%</small></div>
-              {meter(m.value, k, 'lg')}
-            </div>
-          ))}
+          <header className="card-head"><h2>Capaian terhadap target</h2></header>
+          <div className="kpi-values">
+            {([['Pencapaian output', x.totals.bekidoritsu, 'beki'], ['OEE', x.totals.oee, 'oee']] as const).map(([l, m, k]) => (
+              <div className="kpi" key={k}>
+                <div className="hd">{l} · target {s.tgt[k]}%<span>{gap(m, k)}</span></div>
+                <div className="big" style={{ color: MST(m.value, k).c }}>{dec(m.value)}{m.value !== null && <small>%</small>}</div>
+                {meter(m.value, k)}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </section>

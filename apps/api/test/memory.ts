@@ -22,7 +22,23 @@ export async function memoryRepos() {
     { id: 'pm', short: 'PM loss', name: 'PM loss', group: 'planned', oeeBucket: 'A', infoOnly: false, color: 's-paint-475569', aliases: ['PM loss'], details: ['PM Injection'], notes: null, version: 0 },
   ];
   let settings = { body: DEFAULT_SETTINGS, version: 0, updatedAt: new Date().toISOString(), updatedBy: null as string | null };
+  const windows = new Map<string, { count: number; until: number }>();
   const repos: Repos = {
+    transaction: (work) => work(),
+    throttle: {
+      attempt: (key, max, windowMs) => {
+        const now = Date.now();
+        const previous = windows.get(key);
+        const window = previous && previous.until > now ? previous : { count: 0, until: now + windowMs };
+        if (window.count >= max) return Promise.resolve(false);
+        window.count++;
+        windows.set(key, window);
+        return Promise.resolve(true);
+      },
+      clear: (key) => { windows.delete(key); return Promise.resolve(); },
+      pruneExpired: async () => {},
+    },
+    schemaReady: () => Promise.resolve(true),
     users: {
       byUsername: (u) => Promise.resolve(users.find((x) => x.username.toLowerCase() === u.toLowerCase()) ?? null),
       byId: (id) => Promise.resolve(users.find((x) => x.id === id) ?? null),
@@ -53,7 +69,8 @@ export async function memoryRepos() {
       init: () => Promise.resolve(),
     },
     prefs: { get: () => Promise.resolve(null), put: () => Promise.resolve() },
-    master: { parts: () => Promise.resolve([]), materials: () => Promise.resolve([]), categories: () => Promise.resolve(cats.map((c) => ({ ...c }))), upsertPartPrices: () => Promise.resolve([]), upsertMaterials: () => Promise.resolve([]),
+    master: {
+      lockCategories: async () => {}, parts: () => Promise.resolve([]), materials: () => Promise.resolve([]), categories: () => Promise.resolve(cats.map((c) => ({ ...c }))), upsertPartPrices: () => Promise.resolve([]), upsertMaterials: () => Promise.resolve([]),
       saveCategory: (c) => {
         const i = cats.findIndex((x) => x.id === c.id);
         if (c.version === null) { if (i >= 0) return Promise.resolve(false); cats.push({ ...c, version: 0 }); return Promise.resolve(true); }

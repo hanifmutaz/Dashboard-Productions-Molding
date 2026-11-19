@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { migrationFiles, migrationsDirectory } from '../db/migrations.js';
 import { DEFAULT_ROLE_PERMISSIONS, DEFAULT_SETTINGS } from '@mpd/contracts';
 import { loadConfig } from '../config.js';
 import { createAppPool, withTransaction } from '../db/pools.js';
@@ -9,7 +9,6 @@ import { createAppPool, withTransaction } from '../db/pools.js';
 /* Plain ordered SQL migrations (ADR-014). Runs as the DB owner (MIGRATE_DB_USER); the runtime role only receives grants.
  * Each file runs in its own transaction; checksum mismatch of an applied file aborts (no silent drift). */
 const config = loadConfig();
-const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../database/migrations');
 const appRole = config.APP_DB_USER;
 if (!/^[a-z_][a-z0-9_]*$/i.test(appRole)) throw new Error('APP_DB_USER tidak valid untuk GRANT');
 const pool = createAppPool(config, true);
@@ -17,9 +16,9 @@ const pool = createAppPool(config, true);
 async function main() {
   await pool.query('CREATE TABLE IF NOT EXISTS schema_migration (name varchar(120) PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now(), checksum char(64) NOT NULL)');
   const applied = new Map((await pool.query<{ name: string; checksum: string }>('SELECT name, checksum FROM schema_migration')).rows.map((r) => [r.name, r.checksum]));
-  const files = readdirSync(dir).filter((f) => /^\d{3}_.+\.sql$/.test(f)).sort();
+  const files = migrationFiles();
   for (const f of files) {
-    const sql = readFileSync(path.join(dir, f), 'utf8').replaceAll('{{APP_ROLE}}', `"${appRole}"`);
+    const sql = readFileSync(path.join(migrationsDirectory, f), 'utf8').replaceAll('{{APP_ROLE}}', `"${appRole}"`);
     const sum = createHash('sha256').update(sql).digest('hex');
     const prev = applied.get(f);
     if (prev) {

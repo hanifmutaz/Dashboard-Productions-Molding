@@ -88,6 +88,12 @@ describe('freshness (FINAL 15/60)', () => {
     expect(old.records.map((r) => r.date)).toEqual(['2026-11-08']);
     expect(applyFreshness([rec('2026-11-09', null)], now, th).freshness).toBe('unknown');
     expect(applyFreshness([rec('2026-11-01', '2026-11-02T08:00:00+07:00')], now, th).freshness).toBe('not-applicable');
+    expect(applyFreshness([], now, th, 420, 6, true).notices[0]?.code).toBe('NO_TODAY_RECORDS');
+    const recent = { ...rec('2026-11-09', '2026-11-09T09:50:00+07:00'), machineNo: '01' };
+    const delayed = { ...rec('2026-11-09', '2026-11-09T08:00:00+07:00'), machineNo: '02' };
+    const mixed = applyFreshness([recent, delayed], now, th);
+    expect(mixed.freshness).toBe('stale');
+    expect(mixed.records).toEqual([recent]);
   });
 });
 

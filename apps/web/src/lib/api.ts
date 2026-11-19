@@ -23,14 +23,15 @@ async function refreshCsrf(): Promise<boolean> {
   }
 }
 
-async function call<T>(method: string, url: string, body?: unknown, retried = false): Promise<T> {
+async function call<T>(method: string, url: string, body?: unknown, retried = false, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (method !== 'GET' && csrfToken) headers['X-CSRF-Token'] = csrfToken;
   let res: Response;
   try {
-    res = await fetch(url, { method, headers, credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body) });
-  } catch {
+    res = await fetch(url, { method, headers, credentials: 'same-origin', signal, body: body === undefined ? undefined : JSON.stringify(body) });
+  } catch (error) {
+    if (signal?.aborted) throw error;
     throw new ApiFailure(0, 'NETWORK', 'Tidak dapat terhubung ke server. Periksa jaringan.');
   }
   if (res.status === 204) return undefined as T;
@@ -50,7 +51,7 @@ async function call<T>(method: string, url: string, body?: unknown, retried = fa
 }
 
 export const api = {
-  get: <T>(url: string) => call<T>('GET', url),
+  get: <T>(url: string, signal?: AbortSignal) => call<T>('GET', url, undefined, false, signal),
   post: <T>(url: string, body?: unknown) => call<T>('POST', url, body ?? {}),
   put: <T>(url: string, body: unknown) => call<T>('PUT', url, body),
   del: <T>(url: string) => call<T>('DELETE', url),

@@ -74,11 +74,11 @@ export function useTipProps(c: TipContent | null) {
 }
 
 /* ---------- menu (Radix behaviour only, mockup visuals) ---------- */
-export function Menu({ label, children, align = 'end' }: { label: ReactNode; children: ReactNode; align?: 'start' | 'end' }) {
+export function Menu({ label, children, align = 'end', disabled }: { label: ReactNode; children: ReactNode; align?: 'start' | 'end'; disabled?: boolean }) {
   return (
     <Dropdown.Root modal={false}>
       <Dropdown.Trigger asChild>
-        <button className="btn" type="button">{label}</button>
+        <button className="btn" type="button" disabled={disabled}>{label}</button>
       </Dropdown.Trigger>
       <Dropdown.Portal>
         <Dropdown.Content className="ml open" align={align} sideOffset={4} style={{ position: 'static' }}>
@@ -105,15 +105,20 @@ export function MenuCheck({ checked, onChange, children }: { checked: boolean; o
 
 /* ---------- modal (Radix focus trap + Esc) ---------- */
 export function Modal({ open, onClose, title, sub, children }: { open: boolean; onClose: () => void; title: ReactNode; sub?: ReactNode; children: ReactNode }) {
+  const origin = useRef<HTMLElement | null>(null);
   return (
     <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="mbg open">
-          <Dialog.Content className="modal" aria-describedby={undefined}>
+          <Dialog.Content className="modal" {...(!sub ? { "aria-describedby": undefined } : {})}
+            onOpenAutoFocus={() => { origin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }}
+            onCloseAutoFocus={(event) => {
+              if (origin.current?.isConnected) { event.preventDefault(); origin.current.focus(); }
+            }}>
             <div className="ch" style={{ paddingBottom: 'var(--s-size-12)', borderBottom: 'var(--s-size-1) solid var(--line)' }}>
               <div>
                 <Dialog.Title asChild><h3>{title}</h3></Dialog.Title>
-                {sub && <p>{sub}</p>}
+                {sub && <Dialog.Description>{sub}</Dialog.Description>}
               </div>
               <Dialog.Close asChild><button className="btn" type="button">Close</button></Dialog.Close>
             </div>
@@ -140,10 +145,15 @@ export function Toggle({ on, onChange, children, style, disabled }: { on: boolea
 /* ---------- tabs (underline tabs, arrow-key navigation) ---------- */
 export function Tabs<T extends string>({ items, value, onChange, right }: { items: { id: T; label: string }[]; value: T; onChange: (v: T) => void; right?: ReactNode }) {
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
     const i = items.findIndex((x) => x.id === value);
-    const n = items[(i + (e.key === 'ArrowRight' ? 1 : -1) + items.length) % items.length];
-    if (n) onChange(n.id);
+    const index = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + items.length) % items.length;
+    const n = items[index];
+    if (n) {
+      e.currentTarget.querySelectorAll<HTMLButtonElement>('[role=tab]')[index]?.focus();
+      onChange(n.id);
+    }
   };
   return (
     <div className="tabsrow">

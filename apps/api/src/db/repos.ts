@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { AuditEntry, KioskDevice, Material, Part, SettingsBody, StopCategory, StopCategoryInput } from '@mpd/contracts';
@@ -17,6 +18,12 @@ export interface SettingsRow { body: SettingsBody; version: number; updatedAt: s
 export interface KioskRow extends KioskDevice { tokenHash: string }
 
 export interface Repos {
+  transaction<T>(work: () => Promise<T>): Promise<T>;
+  throttle: {
+    attempt(key: string, max: number, windowMs: number): Promise<boolean>;
+    clear(key: string): Promise<void>;
+    pruneExpired(): Promise<void>;
+  };
   users: {
     byUsername(username: string): Promise<UserRow | null>;
     byId(id: string): Promise<UserRow | null>;
@@ -44,6 +51,7 @@ export interface Repos {
   settings: { get(): Promise<SettingsRow | null>; update(body: SettingsBody, version: number, actor: string): Promise<SettingsRow | null>; init(body: SettingsBody): Promise<void> };
   prefs: { get(userId: string): Promise<unknown>; put(userId: string, body: unknown): Promise<void> };
   master: {
+    lockCategories(): Promise<void>;
     parts(): Promise<Part[]>;
     materials(): Promise<Material[]>;
     categories(): Promise<StopCategory[]>;
@@ -67,6 +75,7 @@ export interface Repos {
     touch(id: string): Promise<void>;
   };
   ping(): Promise<void>;
+  schemaReady(names: string[]): Promise<boolean>;
 }
 
 const iso = (v: unknown): string | null => (v instanceof Date ? v.toISOString() : typeof v === 'string' ? v : null);
@@ -101,10 +110,16 @@ class VersionConflict extends Error {
 }
 
 export function createPgRepos(pool: pg.Pool): Repos {
-  const q = pool;
+  const context = new AsyncLocalStorage<pg.PoolClient>();
+  const q: Queryable = { query: (text, values) => (context.getStore() ?? pool).query(text, values) };
+  const run = <T>(work: (client: pg.PoolClient) => Promise<T>): Promise<T> => {
+    const client = context.getStore();
+    return client ? work(client) : withTransaction(pool, (tx) => context.run(tx, () => work(tx)));
+  };
+  let preparedSchema: { key: string; until: number } | null = null;
   const getSettings = async (): Promise<SettingsRow | null> => {
     const r = await q.query('SELECT s.body, s.version, s.updated_at, u.display_name FROM app_settings s LEFT JOIN app_user u ON u.id = s.updated_by WHERE s.id = 1');
-    const x = r.rows[0] as Row | undefined;
+    const x = r.rows[0];
     return x ? { body: x.body as SettingsBody, version: Number(x.version), updatedAt: iso(x.updated_at) ?? '', updatedBy: (x.display_name as string | null) ?? null } : null;
   };
   const conflictKeys = (e: unknown): string[] => {
@@ -112,14 +127,33 @@ export function createPgRepos(pool: pg.Pool): Repos {
     throw e;
   };
   return {
+    transaction: (work) => run(work),
+    throttle: {
+      async attempt(key, max, windowMs) {
+        // A database-side reservation enforces the same bound across workers and concurrent requests.
+        const result = await q.query(`
+          INSERT INTO auth_attempt_window AS w (bucket, attempts, expires_at)
+          VALUES ($1, 1, now() + $3::integer * interval '1 millisecond')
+          ON CONFLICT (bucket) DO UPDATE
+            SET attempts = CASE WHEN w.expires_at <= now() THEN 1 ELSE w.attempts + 1 END,
+                expires_at = CASE WHEN w.expires_at <= now() THEN EXCLUDED.expires_at ELSE w.expires_at END
+            WHERE w.expires_at <= now() OR w.attempts < $2
+          RETURNING attempts`, [key, max, windowMs]);
+        return result.rowCount === 1;
+      },
+      async clear(key) { await q.query('DELETE FROM auth_attempt_window WHERE bucket=$1', [key]); },
+      async pruneExpired() {
+        await q.query('DELETE FROM auth_attempt_window WHERE bucket IN (SELECT bucket FROM auth_attempt_window WHERE expires_at <= now() ORDER BY expires_at LIMIT 10000)');
+      },
+    },
     users: {
       async byUsername(username) {
         const r = await q.query(`${USER_SQL} WHERE lower(u.username) = lower($1)`, [username]);
-        return r.rows[0] ? userFrom(r.rows[0] as Row) : null;
+        return r.rows[0] ? userFrom(r.rows[0]) : null;
       },
       async byId(id) {
         const r = await q.query(`${USER_SQL} WHERE u.id = $1`, [id]);
-        return r.rows[0] ? userFrom(r.rows[0] as Row) : null;
+        return r.rows[0] ? userFrom(r.rows[0]) : null;
       },
       async list() {
         return (await q.query(`${USER_SQL} ORDER BY lower(u.username)`)).rows.map(userFrom);
@@ -149,18 +183,18 @@ export function createPgRepos(pool: pg.Pool): Repos {
       },
       async byId(id) {
         const r = await q.query(`${ROLE_SQL} WHERE r.id = $1`, [id]);
-        return r.rows[0] ? roleFrom(r.rows[0] as Row) : null;
+        return r.rows[0] ? roleFrom(r.rows[0]) : null;
       },
       async create(role) {
         const id = randomUUID();
-        await withTransaction(pool, async (c) => {
+        await run(async (c) => {
           await c.query('INSERT INTO app_role (id, name, description) VALUES ($1,$2,$3)', [id, role.name, role.description]);
           await setRolePermissions(c, id, role.permissions);
         });
         return id;
       },
       async update(id, role, version) {
-        return withTransaction(pool, async (c) => {
+        return run(async (c) => {
           const r = await c.query('UPDATE app_role SET name=$2, description=$3, version=version+1, updated_at=now() WHERE id=$1 AND version=$4 AND NOT is_system', [id, role.name, role.description, version]);
           if (r.rowCount !== 1) return false;
           await setRolePermissions(c, id, role.permissions);
@@ -179,7 +213,7 @@ export function createPgRepos(pool: pg.Pool): Repos {
       // csrf_token bertipe char(64): Postgres mengisi spasi di kanan, sedangkan header HTTP tidak membawanya -> trimEnd.
       async get(idHash) {
         const r = await q.query('SELECT * FROM app_session WHERE id_hash=$1', [idHash]);
-        const s = r.rows[0] as Row | undefined;
+        const s = r.rows[0];
         return s
           ? { idHash: String(s.id_hash), userId: String(s.user_id), csrfToken: String(s.csrf_token).trimEnd(), lastSeenAt: s.last_seen_at as Date, absoluteExpiresAt: s.absolute_expires_at as Date, revokedAt: (s.revoked_at as Date | null) ?? null }
           : null;
@@ -228,7 +262,7 @@ export function createPgRepos(pool: pg.Pool): Repos {
     },
     prefs: {
       async get(userId) {
-        return ((await q.query('SELECT body FROM user_preference WHERE user_id=$1', [userId])).rows[0] as Row | undefined)?.body ?? null;
+        return ((await q.query<{ body: unknown }>('SELECT body FROM user_preference WHERE user_id=$1', [userId])).rows[0])?.body ?? null;
       },
       async put(userId, body) {
         // PG 9.5 supports ON CONFLICT.
@@ -236,6 +270,10 @@ export function createPgRepos(pool: pg.Pool): Repos {
       },
     },
     master: {
+      async lockCategories() {
+        if (!context.getStore()) throw new Error('Category lock requires an active transaction');
+        await q.query('SELECT pg_advisory_xact_lock(414017, 1)');
+      },
       async parts() {
         return (await q.query('SELECT * FROM md_part ORDER BY dp_no')).rows.map((r: Row) => ({
           dpNo: String(r.dp_no), name: String(r.name), pricePerPcs: r.price_per_pcs == null ? null : Number(r.price_per_pcs), materialCode: (r.material_code as string | null) ?? null, version: Number(r.version),
@@ -253,7 +291,7 @@ export function createPgRepos(pool: pg.Pool): Repos {
         }));
       },
       async upsertPartPrices(items, actor) {
-        return withTransaction(pool, async (c) => {
+        return run(async (c) => {
           const failed: string[] = [];
           for (const it of items) {
             if (it.version === null) {
@@ -269,7 +307,7 @@ export function createPgRepos(pool: pg.Pool): Repos {
         }).catch(conflictKeys);
       },
       async upsertMaterials(materials, parts, actor) {
-        return withTransaction(pool, async (c) => {
+        return run(async (c) => {
           const failed: string[] = [];
           for (const m of materials) {
             const r = m.version === null
@@ -309,7 +347,7 @@ export function createPgRepos(pool: pg.Pool): Repos {
         await q.query('INSERT INTO kiosk_pairing (code_hash, name, machine_no, created_by, expires_at) VALUES ($1,$2,$3,$4,$5)', [p.codeHash, p.name, p.machineNo, p.createdBy, p.expiresAt]);
       },
       async redeem(codeHash, tokenHash) {
-        return withTransaction(pool, async (c) => {
+        return run(async (c) => {
           // Row lock guarantees a pairing code is used exactly once even with concurrent redeem attempts.
           const r = await c.query('SELECT * FROM kiosk_pairing WHERE code_hash=$1 AND used_at IS NULL AND expires_at > now() FOR UPDATE', [codeHash]);
           const p = r.rows[0] as Row | undefined;
@@ -322,7 +360,7 @@ export function createPgRepos(pool: pg.Pool): Repos {
       },
       async byTokenHash(hash) {
         const r = await q.query('SELECT * FROM kiosk_device WHERE token_hash=$1', [hash]);
-        return r.rows[0] ? kioskFrom(r.rows[0] as Row) : null;
+        return r.rows[0] ? kioskFrom(r.rows[0]) : null;
       },
       async list() {
         return (await q.query('SELECT * FROM kiosk_device ORDER BY created_at DESC')).rows.map((r: Row) => {
@@ -339,6 +377,14 @@ export function createPgRepos(pool: pg.Pool): Repos {
     },
     async ping() {
       await q.query('SELECT 1');
+    },
+    async schemaReady(names) {
+      const key = names.join(',');
+      if (preparedSchema?.key === key && preparedSchema.until > Date.now()) return true;
+      const result = await q.query('SELECT name FROM schema_migration WHERE name = ANY($1::text[])', [names]);
+      if (result.rowCount !== names.length) return false;
+      preparedSchema = { key, until: Date.now() + 10_000 };
+      return true;
     },
   };
 }

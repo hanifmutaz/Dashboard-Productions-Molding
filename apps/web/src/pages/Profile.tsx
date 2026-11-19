@@ -18,7 +18,7 @@ export function ProfilePage() {
   const [pwMsg, setPwMsg] = useState<string | null>(null);
   useEffect(() => setP(prefs), [prefs]);
   const act = useQuery({ queryKey: ['audit-mine'], queryFn: () => api.get<AuditEntry[]>('/api/admin/audit?mine=true&limit=8') });
-  const logout = useMutation({ mutationFn: () => api.post('/api/auth/logout'), onSettled: () => { qc.clear(); void nav('/login'); } });
+  const logout = useMutation({ mutationFn: () => api.post('/api/auth/logout'), onSuccess: () => { qc.clear(); void nav('/login'); }, onError: () => toast('Gagal keluar. Periksa jaringan lalu coba lagi.') });
   const changePw = useMutation({
     mutationFn: () => api.post('/api/auth/password', { currentPassword: pw.currentPassword, newPassword: pw.newPassword }),
     onSuccess: () => { qc.clear(); void nav('/login?reason=password'); },
@@ -37,7 +37,7 @@ export function ProfilePage() {
           <div className="av">{initials(u.displayName)}</div>
           <div style={{ flex: 1 }}><h2>{u.displayName}</h2><div className="mu">{u.department ?? '—'} · PT Hirose Electric Indonesia</div>
             <div style={{ marginTop: 'var(--s-size-6)', display: 'flex', gap: 'var(--s-size-6)' }}><span className="chip">{u.roleName}</span><span className="chip">Molding Dashboard</span></div></div>
-          <button className="btn" type="button" onClick={() => logout.mutate(undefined)}>Sign out</button>
+          <button className="btn" type="button" disabled={logout.isPending} onClick={() => logout.mutate(undefined)}>{logout.isPending ? 'Signing out…' : 'Sign out'}</button>
         </div></div>
         <div className="g2e">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-size-14)' }}>

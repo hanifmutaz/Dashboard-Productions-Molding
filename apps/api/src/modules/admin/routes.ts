@@ -33,23 +33,30 @@ export function adminRoutes(repos: Repos, audit: Audit): Router {
     const b = parse(UserCreateSchema, req.body);
     await assertAssignable(me.permissions, me.systemKey, b.roleId);
     if (await repos.users.byUsername(b.username)) throw new HttpError(409, 'USERNAME_TAKEN', 'Username sudah dipakai.');
-    const id = await repos.users.create({ username: b.username, displayName: b.displayName, department: b.department, roleId: b.roleId, passwordHash: await hashPassword(b.password) });
-    await audit(req, { action: 'admin.user.create', result: 'success', objectType: 'user', objectId: id, after: { ...b, password: undefined } });
-    res.status(201).json(toUser((await repos.users.byId(id))!));
+    const passwordHash = await hashPassword(b.password);
+    const result = await repos.transaction(async () => {
+      const id = await repos.users.create({ username: b.username, displayName: b.displayName, department: b.department, roleId: b.roleId, passwordHash });
+      await audit(req, { action: 'admin.user.create', result: 'success', objectType: 'user', objectId: id, after: { ...b, password: undefined } });
+      return toUser((await repos.users.byId(id))!);
+    });
+    res.status(201).json(result);
   });
   r.put('/admin/users/:id', usersOnly, async (req, res) => {
     const me = userOf(req);
     const id = String(req.params.id);
     const b = parse(UserUpdateSchema, req.body);
-    const before = await repos.users.byId(id);
-    if (!before) throw notFound('User');
-    if (before.roleSystemKey === 'superAdmin' && me.systemKey !== 'superAdmin') throw forbidden();
-    if (id === me.id && (!b.active || b.roleId !== before.roleId)) throw badRequest('Anda tidak dapat menonaktifkan atau mengganti role akun sendiri.');
-    await assertAssignable(me.permissions, me.systemKey, b.roleId);
-    if (!(await repos.users.update(id, b, b.version))) throw conflict();
-    if (!b.active || b.roleId !== before.roleId) await repos.sessions.revokeForUser(id);
-    await audit(req, { action: 'admin.user.update', result: 'success', objectType: 'user', objectId: id, before: toUser(before), after: b });
-    res.json(toUser((await repos.users.byId(id))!));
+    const result = await repos.transaction(async () => {
+      const before = await repos.users.byId(id);
+      if (!before) throw notFound('User');
+      if (before.roleSystemKey === 'superAdmin' && me.systemKey !== 'superAdmin') throw forbidden();
+      if (id === me.id && (!b.active || b.roleId !== before.roleId)) throw badRequest('Anda tidak dapat menonaktifkan atau mengganti role akun sendiri.');
+      await assertAssignable(me.permissions, me.systemKey, b.roleId);
+      if (!(await repos.users.update(id, b, b.version))) throw conflict();
+      if (!b.active || b.roleId !== before.roleId) await repos.sessions.revokeForUser(id);
+      await audit(req, { action: 'admin.user.update', result: 'success', objectType: 'user', objectId: id, before: toUser(before), after: b });
+      return toUser((await repos.users.byId(id))!);
+    });
+    res.json(result);
   });
   r.post('/admin/users/:id/password', usersOnly, async (req, res) => {
     const me = userOf(req);
@@ -58,9 +65,12 @@ export function adminRoutes(repos: Repos, audit: Audit): Router {
     const u = await repos.users.byId(id);
     if (!u) throw notFound('User');
     if (u.roleSystemKey === 'superAdmin' && me.systemKey !== 'superAdmin') throw forbidden();
-    await repos.users.setPassword(id, await hashPassword(b.password));
-    await repos.sessions.revokeForUser(id);
-    await audit(req, { action: 'admin.user.password-reset', result: 'success', objectType: 'user', objectId: id });
+    const passwordHash = await hashPassword(b.password);
+    await repos.transaction(async () => {
+      await repos.users.setPassword(id, passwordHash);
+      await repos.sessions.revokeForUser(id);
+      await audit(req, { action: 'admin.user.password-reset', result: 'success', objectType: 'user', objectId: id });
+    });
     res.status(204).end();
   });
 
@@ -71,26 +81,34 @@ export function adminRoutes(repos: Repos, audit: Audit): Router {
     const me = userOf(req);
     const b = parse(RoleUpsertSchema, req.body);
     if (!isSubset(b.permissions, me.permissions)) throw new HttpError(403, 'PRIVILEGE_ESCALATION', 'Tidak boleh memberi permission melebihi milik Anda.');
-    const id = await repos.roles.create({ name: b.name, description: b.description, permissions: b.permissions });
-    await audit(req, { action: 'admin.role.create', result: 'success', objectType: 'role', objectId: id, after: b });
-    res.status(201).json(toRole((await repos.roles.byId(id))!));
+    const result = await repos.transaction(async () => {
+      const id = await repos.roles.create({ name: b.name, description: b.description, permissions: b.permissions });
+      await audit(req, { action: 'admin.role.create', result: 'success', objectType: 'role', objectId: id, after: b });
+      return toRole((await repos.roles.byId(id))!);
+    });
+    res.status(201).json(result);
   });
   r.put('/admin/roles/:id', rolesOnly, async (req, res) => {
     const me = userOf(req);
     const id = String(req.params.id);
     const b = parse(RoleUpsertSchema, req.body);
-    const before = await repos.roles.byId(id);
-    if (!before) throw notFound('Role');
-    if (before.isSystem) throw new HttpError(403, 'SYSTEM_ROLE', 'Role sistem tidak dapat diubah.');
-    if (!isSubset(b.permissions, me.permissions)) throw new HttpError(403, 'PRIVILEGE_ESCALATION', 'Tidak boleh memberi permission melebihi milik Anda.');
-    if (b.version === null || !(await repos.roles.update(id, b, b.version))) throw conflict();
-    await audit(req, { action: 'admin.role.update', result: 'success', objectType: 'role', objectId: id, before: toRole(before), after: b });
-    res.json(toRole((await repos.roles.byId(id))!));
+    const result = await repos.transaction(async () => {
+      const before = await repos.roles.byId(id);
+      if (!before) throw notFound('Role');
+      if (before.isSystem) throw new HttpError(403, 'SYSTEM_ROLE', 'Role sistem tidak dapat diubah.');
+      if (!isSubset(b.permissions, me.permissions)) throw new HttpError(403, 'PRIVILEGE_ESCALATION', 'Tidak boleh memberi permission melebihi milik Anda.');
+      if (b.version === null || !(await repos.roles.update(id, b, b.version))) throw conflict();
+      await audit(req, { action: 'admin.role.update', result: 'success', objectType: 'role', objectId: id, before: toRole(before), after: b });
+      return toRole((await repos.roles.byId(id))!);
+    });
+    res.json(result);
   });
   r.delete('/admin/roles/:id', rolesOnly, async (req, res) => {
     const id = String(req.params.id);
-    if (!(await repos.roles.remove(id))) throw new HttpError(409, 'ROLE_IN_USE', 'Role sistem atau role yang masih dipakai user tidak dapat dihapus.');
-    await audit(req, { action: 'admin.role.delete', result: 'success', objectType: 'role', objectId: id });
+    await repos.transaction(async () => {
+      if (!(await repos.roles.remove(id))) throw new HttpError(409, 'ROLE_IN_USE', 'Role sistem atau role yang masih dipakai user tidak dapat dihapus.');
+      await audit(req, { action: 'admin.role.delete', result: 'success', objectType: 'role', objectId: id });
+    });
     res.status(204).end();
   });
 

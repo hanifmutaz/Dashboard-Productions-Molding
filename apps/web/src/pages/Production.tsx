@@ -1,8 +1,6 @@
 import { useState, type ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { PERMISSIONS, type MachineProduction, type ProductionView, type ViewDataEnvelope } from '@mpd/contracts';
-import { api, qs } from '../lib/api';
-import { useFilters, useReportSource } from '../lib/filters';
+import { PERMISSIONS, type MachineProduction, type ProductionView } from '@mpd/contracts';
+import { useMonitoring } from '../lib/monitoring';
 import { useSession } from '../lib/session';
 import { cls, colOf, delta, mv, Pc } from '../lib/status';
 import { DOW, f1, fmt, lbl, lblY, pd } from '../lib/format';
@@ -14,19 +12,6 @@ import { Menu, MenuCheck, MenuItem, Tabs, useToast } from '../components/ui';
 import { EnvelopeBanner, emptyMsg } from '../components/state';
 import { RateModal, type RateTarget } from './RateModal';
 
-export function useMonitoring<T>(path: string, extra: Record<string, string | undefined> = {}) {
-  const { f } = useFilters();
-  const { settings } = useSession();
-  const q = useQuery({
-    queryKey: [path, f.from, f.to, f.shift, f.status, f.q, extra],
-    queryFn: () => api.get<ViewDataEnvelope<T>>(`/api/v1/monitoring/${path}?${qs({ from: f.from, to: f.to, shift: f.shift || undefined, status: f.status || undefined, q: f.q || undefined, ...extra })}`),
-    refetchInterval: settings.data.refresh * 60_000,
-    placeholderData: (prev) => prev,
-  });
-  useReportSource(q.data, q.isPending, q.isError);
-  return q;
-}
-
 const PCOLS: { k: string; h: string; n?: boolean; fix?: boolean }[] = [
   { k: 'machineNo', h: 'Machine', fix: true }, { k: 'productName', h: 'Part', fix: true }, { k: 'plan', h: 'Prod. plan', n: true, fix: true },
   { k: 'actual', h: 'Actual', n: true, fix: true }, { k: 'bekidoritsu', h: 'Bekidoritsu', n: true, fix: true }, { k: 'deviation', h: 'Deviation', n: true, fix: true },
@@ -36,7 +21,6 @@ const PCOLS: { k: string; h: string; n?: boolean; fix?: boolean }[] = [
 
 export function ProductionPage() {
   const { settings: s, prefs, savePrefs, can } = useSession();
-  const { f } = useFilters();
   const toast = useToast();
   const q = useMonitoring<ProductionView>('production');
   const [tab, setTab] = useState<'prod-0' | 'prod-1' | 'prod-2'>('prod-0');
@@ -54,7 +38,9 @@ export function ProductionPage() {
         case 'machineNo': return <><span className="chev">›</span> <span className="mc">MC {m.machineNo}</span></>;
         case 'productName': return m.productName ?? '—';
         case 'bekidoritsu': return <Pc m={m.bekidoritsu} k="beki" s={s} onClick={() => setRate({ machineNo: m.machineNo, label: `MC ${m.machineNo} · ${m.productName ?? ''}` })} />;
-        case 'deviation': return <span className={m.deviation < 0 ? 'bad' : 'good'}>{m.deviation < 0 ? '−' : '+'}{fmt(Math.abs(m.deviation))}</span>;
+        case 'plan': return m.planReported === false ? '—' : fmt(m.plan);
+        case 'actual': return m.actualReported === false ? '—' : fmt(m.actual);
+        case 'deviation': return m.planReported === false || m.actualReported === false ? '—' : <span className={m.deviation < 0 ? 'bad' : 'good'}>{m.deviation < 0 ? '−' : '+'}{fmt(Math.abs(m.deviation))}</span>;
         case 'sharePct': return m.sharePct.value === null ? '—' : f1(m.sharePct.value) + '%';
         case 'rejectPct': return m.rejectPct.value === null ? '—' : f1(m.rejectPct.value) + '%';
         case 'ipr': return fmt(m.ipr.value);
@@ -64,35 +50,35 @@ export function ProductionPage() {
   }));
 
   const msg = emptyMsg(env);
-  const offs = v ? v.daily.map((d, i) => (d.plan ? -1 : i)).filter((i) => i >= 0) : [];
+  const noRecord = v ? v.daily.flatMap((d, i) => d.hasRecord === false ? [i] : []) : [];
   const tipD = (i: number) => { const d = v!.daily[i]!.date; return `${DOW[pd(d).getUTCDay()]} ${lblY(d)}`; };
   const worst = v ? [...v.machines].filter((m) => m.bekidoritsu.value !== null).sort((a, b) => a.bekidoritsu.value! - b.bekidoritsu.value!)[0] : undefined;
   const exportCsv = () => {
-    if (!v) return;
-    downloadCsv(`molding_production_${f.from}_${f.to}.csv`, [
+    if (!v || q.isError) return;
+    downloadCsv(`molding_production_${v.range.from}_${v.range.to}.csv`, [
       ['Machine', 'DP Part', 'DP Name', 'Production plan', 'Production actual', 'Bekidoritsu %', 'Deviation', 'Reject', 'Reject %', 'RIP ppm', 'Reject names', 'Stop min'],
-      ...v.machines.map((m) => ['MC ' + m.machineNo, m.dpNo, m.productName, m.plan, m.actual, f1(m.bekidoritsu.value), m.deviation, m.reject, f1(m.rejectPct.value), m.ipr.value === null ? '' : Math.round(m.ipr.value), m.rejects.map((r) => `${r.name}:${r.qty}`).join(' | '), m.stopMinutes]),
+      ...v.machines.map((m) => ['MC ' + m.machineNo, m.dpNo, m.productName, m.planReported === false ? null : m.plan, m.actualReported === false ? null : m.actual, f1(m.bekidoritsu.value), m.planReported === false || m.actualReported === false ? null : m.deviation, m.reject, f1(m.rejectPct.value), m.ipr.value === null ? '' : Math.round(m.ipr.value), m.rejects.map((r) => `${r.name}:${r.qty}`).join(' | '), m.stopMinutes]),
     ]);
-    toast(`Exported production ${f.from}_${f.to}`);
+    toast(`Exported production ${v.range.from}_${v.range.to}`);
   };
 
   return (
     <section className="view on">
       <div className="content">
-        <EnvelopeBanner env={env} error={q.error} />
+        <EnvelopeBanner env={env} error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
         <div className="deck">
           {q.isPending ? <SkelDeck n={4} /> : !t ? <EmptyDeck labels={['Production plan', 'Production actual', 'Bekidoritsu', 'Deviation']} msg={msg} /> : (
             <>
-              <Kpi l="Production plan" v={fmt(t.plan)} u="pcs" d={<>{delta(t.plan, p?.plan, 'flat')} {vs}</>} />
-              <Kpi l="Production actual" v={fmt(t.actual)} u="pcs" d={<>{delta(t.actual, p?.actual, 'flat')} {vs}</>} />
+              <Kpi l="Production plan" v={t.planReported === false ? '—' : fmt(t.plan)} u="pcs" d={<>{delta(t.planReported === false ? null : t.plan, p?.planReported === false ? null : p?.plan, 'flat')} {vs}</>} />
+              <Kpi l="Production actual" v={t.actualReported === false ? '—' : fmt(t.actual)} u="pcs" d={<>{delta(t.actualReported === false ? null : t.actual, p?.actualReported === false ? null : p?.actual, 'flat')} {vs}</>} />
               <Kpi l="Bekidoritsu" v={f1(t.bekidoritsu.value)} u="%" title={t.bekidoritsu.reason ?? undefined} d={<>{delta(t.bekidoritsu.value, p?.bekidoritsu.value, 'up', true)} {vs}</>} g={{ v: t.bekidoritsu.value, k: 'beki' }} onClick={() => setRate({ machineNo: null, label: 'All machines in filter' })} />
-              <Kpi l="Deviation" v={(t.deviation < 0 ? '−' : '+') + fmt(Math.abs(t.deviation))} u="pcs" vc={t.deviation < 0 ? 'var(--bad)' : 'var(--good)'} desc="Production actual − plan" d={<>{delta(t.deviation, p?.deviation, 'up')} {vs}</>} />
+              <Kpi l="Deviation" v={t.planReported === false || t.actualReported === false ? '—' : (t.deviation < 0 ? '−' : '+') + fmt(Math.abs(t.deviation))} u="pcs" vc={t.deviation < 0 ? 'var(--bad)' : 'var(--good)'} desc="Production actual − plan" d={<>{delta(t.deviation, p?.deviation, 'up')} {vs}</>} />
             </>
           )}
         </div>
         <div className="card">
           <div className="strip-note">
-            <span>{worst ? <><span className="dot" style={{ background: 'var(--bad)' }} />Lowest achievement: <b>MC {worst.machineNo}</b> at <b className="bad">{f1(worst.bekidoritsu.value)}%</b>, {fmt(-worst.deviation)} pcs below plan.</> : msg}</span>
+            <span>{worst ? <><span className="dot" style={{ background: worst.deviation < 0 ? 'var(--bad)' : 'var(--good)' }} />Lowest achievement: <b>MC {worst.machineNo}</b> at <b>{f1(worst.bekidoritsu.value)}%</b>, {worst.deviation === 0 ? 'on plan' : `${fmt(Math.abs(worst.deviation))} pcs ${worst.deviation < 0 ? 'below' : 'above'} plan`}.</> : msg}</span>
             <span style={{ display: 'flex', gap: 'var(--s-size-14)', alignItems: 'center' }}>
               <span className="fa" style={{ fontSize: 'var(--s-size-12)' }}>Targets in Settings</span>
               <button className="lnk" type="button" aria-expanded={more} onClick={() => setMore((x) => !x)}>{more ? 'Show fewer metrics' : 'Show more metrics'}</button>
@@ -102,8 +88,6 @@ export function ProductionPage() {
             {([
               ['Production gross', fmt(t?.gross), 'pcs', delta(t?.gross, p?.gross, 'up')],
               ['Reject', fmt(t?.reject), `pcs · ${fmt(t?.ipr.value)} ppm`, delta(t?.reject, p?.reject, 'down')],
-              ['Sales', '—', 'belum disetujui (Q-009)', <span className="fa" key="s">—</span>],
-              ['Scrap', '—', 'belum disetujui (Q-009)', <span className="fa" key="c">—</span>],
             ] as [string, string, string, ReactNode][]).map((x) => (
               <div key={x[0]}><div className="caps">{x[0]}</div><div className="v">{x[1]}<small>{x[2]}</small></div><div className="d">{x[3]}</div></div>
             ))}
@@ -113,15 +97,15 @@ export function ProductionPage() {
         {tab === 'prod-0' && (
           <div className="pane on"><div className="card">
             <div className="ch"><div><h3>Production plan vs actual per day</h3><p>{v ? `${rangeTxt(v.range.from, v.range.to)} · average ${fmt(v.daily.filter((d) => d.plan).length ? v.totals.plan / v.daily.filter((d) => d.plan).length : 0)} pcs planned per production day` : msg}</p></div>
-              <div className="legend"><span><i style={{ background: 'var(--plan)' }} />Production plan</span><span><i style={{ background: 'var(--act)' }} />Production actual</span><span><i style={{ background: 'var(--line-2)' }} />No production</span></div></div>
+              <div className="legend"><span><i style={{ background: 'var(--plan)' }} />Production plan</span><span><i style={{ background: 'var(--act)' }} />Production actual</span><span><i style={{ background: 'var(--line-2)' }} />No record</span></div></div>
             <div className="cb">
               {v ? (
                 <>
-                  <Chart aria="Daily production plan versus actual" labels={v.daily.map((d) => lbl(d.date))} off={offs} h={230} bw={18} tipT={tipD}
-                    bars={[{ name: 'Production plan', col: 'var(--plan)', vals: v.daily.map((d) => d.plan) }, { name: 'Production actual', col: 'var(--act)', vals: v.daily.map((d) => d.actual) }]}
-                    tipX={(i) => (v.daily[i]!.plan ? [{ label: 'Deviation', value: fmt(v.daily[i]!.actual - v.daily[i]!.plan) }] : [{ label: 'No production planned', value: '' }])} />
-                  <div className="subh">Bekidoritsu per day <span>target {s.tgt.beki}%{offs.length ? ' · shaded = no production day' : ''}</span></div>
-                  <Chart aria="Daily Bekidoritsu versus target" labels={v.daily.map((d) => lbl(d.date))} off={offs} yMax={120} yFmt={(x) => Math.round(x) + '%'} h={160} tipT={tipD}
+                  <Chart aria="Daily production plan versus actual" labels={v.daily.map((d) => lbl(d.date))} off={noRecord} offLabel="—" h={230} bw={18} tipT={tipD}
+                    bars={[{ name: 'Production plan', col: 'var(--plan)', vals: v.daily.map((d) => d.hasRecord === false || d.planReported === false ? null : d.plan) }, { name: 'Production actual', col: 'var(--act)', vals: v.daily.map((d) => d.hasRecord === false || d.actualReported === false ? null : d.actual) }]}
+                    tipX={(i) => { const d = v.daily[i]!; return [d.hasRecord === false ? { label: 'Belum ada catatan', value: '—' } : d.planReported === false || d.actualReported === false ? { label: 'Plan atau actual belum tersedia', value: '—' } : { label: 'Deviation', value: fmt(d.actual - d.plan) }]; }} />
+                  <div className="subh">Bekidoritsu per day <span>target {s.tgt.beki}%{noRecord.length ? ' · shaded = no record' : ''}</span></div>
+                  <Chart aria="Daily Bekidoritsu versus target" labels={v.daily.map((d) => lbl(d.date))} off={noRecord} offLabel="—" yMax={120} yFmt={(x) => Math.round(x) + '%'} h={160} tipT={tipD}
                     bars={[{ name: '', vals: v.daily.map(() => null) }]} target={s.tgt.beki} targetLbl={`Target ${s.tgt.beki}%`}
                     line={{ name: 'Bekidoritsu', col: 'var(--ratio)', fmt: (x) => f1(x) + '%', vals: v.daily.map((d) => d.bekidoritsu.value) }} />
                   <details style={{ marginTop: 'var(--s-size-10)' }}>
@@ -130,8 +114,8 @@ export function ProductionPage() {
                       <table>
                         <thead><tr><th className="nos">Date</th>{v.daily.map((d) => <th key={d.date} className="nos n">{lbl(d.date)}<br /><span className="fa" style={{ fontWeight: 'var(--c-font-weight-500)' }}>{DOW[pd(d.date).getUTCDay()]}</span></th>)}<th className="nos n">Total</th></tr></thead>
                         <tbody>
-                          <tr><td>Production plan</td>{v.daily.map((d) => <td key={d.date} className="n">{d.plan ? fmt(d.plan) : <span className="fa">off</span>}</td>)}<td className="n"><b>{fmt(v.totals.plan)}</b></td></tr>
-                          <tr><td>Production actual</td>{v.daily.map((d) => <td key={d.date} className="n">{d.actual ? fmt(d.actual) : '—'}</td>)}<td className="n"><b>{fmt(v.totals.actual)}</b></td></tr>
+                          <tr><td>Production plan</td>{v.daily.map((d) => <td key={d.date} className="n">{d.hasRecord === false || d.planReported === false ? '—' : fmt(d.plan)}</td>)}<td className="n"><b>{v.totals.planReported === false ? '—' : fmt(v.totals.plan)}</b></td></tr>
+                          <tr><td>Production actual</td>{v.daily.map((d) => <td key={d.date} className="n">{d.hasRecord === false || d.actualReported === false ? '—' : fmt(d.actual)}</td>)}<td className="n"><b>{v.totals.actualReported === false ? '—' : fmt(v.totals.actual)}</b></td></tr>
                           <tr><td>Bekidoritsu</td>{v.daily.map((d) => <td key={d.date} className="n"><Pc m={d.bekidoritsu} k="beki" s={s} /></td>)}<td className="n"><Pc m={v.totals.bekidoritsu} k="beki" s={s} /></td></tr>
                         </tbody>
                       </table>
@@ -149,11 +133,11 @@ export function ProductionPage() {
                 <Menu label="Columns ▾">
                   <div className="caps" style={{ padding: 'var(--s-size-6) var(--s-size-10)' }}>Extra columns</div>
                   {PCOLS.filter((c) => !c.fix).map((c) => (
-                    <MenuCheck key={c.k} checked={prefs.cols.includes(c.k)} onChange={(on) => void savePrefs({ ...prefs, cols: on ? [...prefs.cols, c.k] : prefs.cols.filter((x) => x !== c.k) })}>{c.h}</MenuCheck>
+                    <MenuCheck key={c.k} checked={prefs.cols.includes(c.k)} onChange={(on) => void savePrefs({ cols: on ? [...prefs.cols, c.k] : prefs.cols.filter((x) => x !== c.k) }).catch(() => toast('Gagal menyimpan preferensi'))}>{c.h}</MenuCheck>
                   ))}
                 </Menu>
                 {can(PERMISSIONS.exportProduction) && (
-                  <Menu label="Export ▾"><MenuItem onSelect={exportCsv}>Excel / CSV (filtered)</MenuItem><MenuItem onSelect={() => print()}>Print / PDF</MenuItem></Menu>
+                  <Menu label="Export ▾" disabled={!v || q.isError}><MenuItem onSelect={exportCsv}>Excel / CSV (filtered)</MenuItem><MenuItem onSelect={() => print()}>Print / PDF</MenuItem></Menu>
                 )}
               </div>
             </div>

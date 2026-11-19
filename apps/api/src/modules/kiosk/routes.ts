@@ -2,7 +2,7 @@ import { randomInt } from 'node:crypto';
 import { Router } from 'express';
 import { PERMISSIONS, PairingCreateSchema, PairingRedeemSchema, type PairingCode } from '@mpd/contracts';
 import type { Repos } from '../../db/repos.js';
-import { HttpError, notFound } from '../../http/errors.js';
+import { HttpError, notFound, tooMany } from '../../http/errors.js';
 import { KIOSK_COOKIE, cookieOptions, parse, requirePermission, sha256, token, userOf, type Audit } from '../../http/middleware.js';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -21,28 +21,37 @@ export function kioskRoutes(repos: Repos, audit: Audit, secure: boolean): Router
     const b = parse(PairingCreateSchema, req.body);
     const code = newCode();
     const expiresAt = new Date(Date.now() + 10 * 60_000);
-    await repos.kiosks.createPairing({ codeHash: sha256(code), name: b.name, machineNo: b.machineNo, expiresAt, createdBy: me.id });
-    await audit(req, { action: 'kiosk.pairing.create', result: 'success', objectType: 'kiosk', after: b });
+    await repos.transaction(async () => {
+      await repos.kiosks.createPairing({ codeHash: sha256(code), name: b.name, machineNo: b.machineNo, expiresAt, createdBy: me.id });
+      await audit(req, { action: 'kiosk.pairing.create', result: 'success', objectType: 'kiosk', after: b });
+    });
     const out: PairingCode = { code: `${code.slice(0, 4)}-${code.slice(4)}`, expiresAt: expiresAt.toISOString(), name: b.name, machineNo: b.machineNo };
     res.status(201).json(out);
   });
   r.post('/admin/kiosks/:id/revoke', manage, async (req, res) => {
     const me = userOf(req);
     const id = String(req.params.id);
-    if (!(await repos.kiosks.revoke(id, me.id))) throw notFound('Kiosk aktif');
-    await audit(req, { action: 'kiosk.revoke', result: 'success', objectType: 'kiosk', objectId: id });
+    await repos.transaction(async () => {
+      if (!(await repos.kiosks.revoke(id, me.id))) throw notFound('Kiosk aktif');
+      await audit(req, { action: 'kiosk.revoke', result: 'success', objectType: 'kiosk', objectId: id });
+    });
     res.status(204).end();
   });
   r.post('/kiosk/pair', async (req, res) => {
     const b = parse(PairingRedeemSchema, req.body);
+    const ip = req.ip ?? 'unknown';
+    if (!await repos.throttle.attempt('kiosk-ip:' + sha256(ip), 20, 10 * 60_000)) throw tooMany();
     const credential = token(48);
-    const device = await repos.kiosks.redeem(sha256(normalize(b.code)), sha256(credential));
+    const device = await repos.transaction(async () => {
+      const redeemed = await repos.kiosks.redeem(sha256(normalize(b.code)), sha256(credential));
+      if (redeemed) await audit(req, { action: 'kiosk.pair', result: 'success', objectType: 'kiosk', objectId: redeemed.id, actorLabel: `kiosk:${redeemed.name}` });
+      return redeemed;
+    });
     if (!device) {
       await audit(req, { action: 'kiosk.pair', result: 'failure', actorLabel: 'kiosk' });
       throw new HttpError(400, 'PAIRING_INVALID', 'Kode pairing tidak valid, sudah dipakai, atau kedaluwarsa.');
     }
     res.cookie(KIOSK_COOKIE, credential, cookieOptions(secure, 400 * 864e5));
-    await audit(req, { action: 'kiosk.pair', result: 'success', objectType: 'kiosk', objectId: device.id, actorLabel: `kiosk:${device.name}` });
     res.json({ machineNo: device.machineNo, name: device.name });
   });
   return r;

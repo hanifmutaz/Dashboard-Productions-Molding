@@ -26,6 +26,8 @@ export interface AppDeps {
   tzOffsetMinutes: number;
   version: string;
   webDist?: string;
+  employeePhotoDir?: string;
+  requiredMigrations?: string[];
 }
 
 export function createApp(d: AppDeps): Express {
@@ -44,6 +46,17 @@ export function createApp(d: AppDeps): Express {
 
   const api = express.Router();
   api.use(express.json({ limit: '1mb' }));
+  const health = healthRoutes(d.repos, d.conmas, d.version, d.requiredMigrations ?? []);
+  api.use(async (req, res, next) => {
+    if (req.method === 'GET' && req.path === '/health') { health(req, res, next); return; }
+    if (d.requiredMigrations && !await d.repos.schemaReady(d.requiredMigrations).catch(() => false)) {
+      res.setHeader('Cache-Control', 'no-store');
+      if (req.method === 'GET' && req.path === '/health/ready') { health(req, res, next); return; }
+      res.status(503).json({ error: { code: 'SCHEMA_NOT_READY', message: 'Database aplikasi belum siap. Periksa status migrasi.', requestId: req.requestId } });
+      return;
+    }
+    next();
+  });
   api.use(authenticate(d.repos, { idleMinutes: d.idleMinutes, secure: d.cookieSecure }));
   api.use(csrf(d.publicOrigin));
   api.use((_req, res, next) => {
@@ -57,13 +70,13 @@ export function createApp(d: AppDeps): Express {
     cache.categories = null;
     d.conmas.invalidate();
   };
-  api.use(healthRoutes(d.repos, d.conmas, d.version));
-  api.use(authRoutes(d.repos, audit, { secure: d.cookieSecure, absoluteHours: d.absoluteHours }));
+  api.use(health);
+  api.use(authRoutes(d.repos, audit, { secure: d.cookieSecure, absoluteHours: d.absoluteHours, plantUtcOffsetMinutes: d.tzOffsetMinutes }));
   api.use(settingsRoutes(d.repos, audit, invalidate));
   api.use(masterDataRoutes(d.repos, d.conmas, audit, invalidate));
   api.use(adminRoutes(d.repos, audit));
   api.use(kioskRoutes(d.repos, audit, d.cookieSecure));
-  api.use(metricsRoutes(d.repos, d.conmas, cache, d.tzOffsetMinutes));
+  api.use(metricsRoutes(d.repos, d.conmas, cache, d.tzOffsetMinutes, d.employeePhotoDir));
   api.use(() => {
     throw notFound('Endpoint');
   });

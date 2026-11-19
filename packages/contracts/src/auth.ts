@@ -16,11 +16,13 @@ export interface SessionUser {
 }
 export interface MeResponse {
   kind: 'user';
+  plantUtcOffsetMinutes?: number;
   user: SessionUser;
   csrfToken: string;
 }
 export interface KioskMeResponse {
   kind: 'kiosk';
+  plantUtcOffsetMinutes?: number;
   kiosk: { id: string; name: string; machineNo: string };
 }
 export type WhoAmI = MeResponse | KioskMeResponse;

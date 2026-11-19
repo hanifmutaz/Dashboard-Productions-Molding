@@ -166,8 +166,8 @@ export function auditor(repos: Repos, log: Logger) {
         detail: sanitize({ before: e.before, after: e.after, extra: e.extra }),
       });
     } catch (err) {
-      // Audit failure must be visible to operators; the business response is already decided.
       log.error({ err, requestId: req.requestId, action: e.action }, 'AUDIT WRITE FAILED');
+      if (e.result === 'success') throw err;
     }
   };
 }

@@ -8,6 +8,8 @@ export type LossGroup = z.infer<typeof LossGroupSchema>;
 export interface ProductionTotals {
   plan: number;
   actual: number;
+  planReported?: boolean;
+  actualReported?: boolean;
   gross: number | null;
   reject: number | null;
   /** Approved: actual / plan * 100. null when plan = 0. */
@@ -26,7 +28,7 @@ export interface MachineProduction extends ProductionTotals {
   rejects: { name: string; qty: number }[];
   achievement: 'attention' | 'within' | 'unknown';
 }
-export interface DailyProduction { date: string; plan: number; actual: number; bekidoritsu: Metric }
+export interface DailyProduction { date: string; plan: number; actual: number; bekidoritsu: Metric; hasRecord?: boolean; planReported?: boolean; actualReported?: boolean }
 export interface GroupProduction { group: string; plan: number; actual: number; bekidoritsu: Metric }
 export interface ProductionView {
   range: { from: string; to: string; shift: string | null; days: number };
@@ -98,7 +100,7 @@ export interface DailyRateRow { date: string; plan: number; actual: number; beki
 export interface DailyRatesView { machineNo: string | null; productName: string | null; rows: DailyRateRow[] }
 
 /** Sales (Q-009): Rp = OUTPUT ACTUAL x Harga/PCS (Master Data). Part tanpa harga tidak dihitung sebagai 0: qty-nya dilaporkan di uncoveredQty. */
-export interface SalesPeriodRow { key: string; sales: number; goodQty: number; uncoveredQty: number }
+export interface SalesPeriodRow { key: string; sales: number; goodQty: number; uncoveredQty: number; hasValuation?: boolean }
 export interface SalesPartRow { dpNo: string | null; productName: string | null; goodQty: number; pricePerPcs: number | null; sales: Metric }
 export interface SalesView {
   range: { from: string; to: string; days: number };
@@ -115,7 +117,7 @@ export interface SalesView {
 /** Scrap (Q-009): NG (gram) ConMas -> kg; Rp = gram x harga material per gram (part -> material, Master Data). Rumus nilai PROPOSED.
  *  Record tanpa NG gram atau tanpa harga material tidak dihitung sebagai 0: gram-nya dilaporkan di unvaluedGram / recordsWithoutGram.
  *  Ratio = scrap value / sales hanya dari record yang punya keduanya (agar pembilang dan penyebut sebanding). */
-export interface ScrapPeriodRow { key: string; scrapGram: number; scrapValue: number; unvaluedGram: number; ratio: Metric; materials: { code: string | null; value: number }[] }
+export interface ScrapPeriodRow { key: string; hasValuation?: boolean; scrapGram: number; scrapValue: number; unvaluedGram: number; ratio: Metric; materials: { code: string | null; value: number }[] }
 export interface ScrapMaterialRow { code: string | null; name: string | null; pricePerGram: number | null; scrapGram: number; scrapValue: Metric }
 export interface ScrapPartRow {
   dpNo: string | null; productName: string | null; materialCode: string | null; materialName: string | null; pricePerGram: number | null; pricePerPcs: number | null;

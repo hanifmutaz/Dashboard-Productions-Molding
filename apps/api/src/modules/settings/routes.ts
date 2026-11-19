@@ -22,12 +22,15 @@ export function settingsRoutes(repos: Repos, audit: Audit, onChange: () => void)
   r.put('/settings', requirePermission(PERMISSIONS.editSettings), async (req, res) => {
     const me = userOf(req);
     const b = parse(SettingsUpdateSchema, req.body);
-    const before = await load();
-    const saved = await repos.settings.update(b.settings, b.version, me.id);
-    if (!saved) throw conflict();
+    const result = await repos.transaction(async () => {
+      const before = await load();
+      const saved = await repos.settings.update(b.settings, b.version, me.id);
+      if (!saved) throw conflict();
+      await audit(req, { action: 'settings.update', result: 'success', objectType: 'settings', objectId: '1', before, after: b.settings });
+      return load();
+    });
     onChange();
-    await audit(req, { action: 'settings.update', result: 'success', objectType: 'settings', objectId: '1', before, after: b.settings });
-    res.json(await load());
+    res.json(result);
   });
   return r;
 }

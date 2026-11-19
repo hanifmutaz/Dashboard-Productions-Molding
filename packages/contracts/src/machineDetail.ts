@@ -1,5 +1,15 @@
 import type { Metric } from './envelope.js';
 
+export const MACHINE_PERSONNEL_ROLES = ['leader', 'cell', 'technician', 'operator'] as const;
+export type MachinePersonnelRole = (typeof MACHINE_PERSONNEL_ROLES)[number];
+
+export interface MachinePersonnel {
+  role: MachinePersonnelRole;
+  nik: string | null;
+  name?: string | null;
+  photoUrl?: string;
+}
+
 export interface MachineShift {
   shift: '1' | '2' | '3';
   time: string;
@@ -22,8 +32,9 @@ export interface MachineDetailView {
   nextDate: string | null;
   hasRecord: boolean;
   header: { dpNo: string | null; productName: string | null; poNo: string | null; cavity: string | null; ctPlan: Metric; ctActual: Metric };
-  /** Personnel NIK only; name lookup is Q-021. Hidden unless Settings md.pic is on. */
-  personnel: { role: 'leader' | 'cell' | 'technician' | 'operator'; nik: string | null }[];
+  /** Personnel from the latest available shift for this machine and production date. */
+  personnel: MachinePersonnel[];
+  personnelShift?: MachineShift['shift'] | null;
   shifts: MachineShift[];
   totals: { plan: number; actual: number; gross: number | null; reject: number | null; deviation: number; ipr: Metric; stopMinutes: number; bekidoritsu: Metric; oee: Metric };
   stops: MachineStopEvent[];

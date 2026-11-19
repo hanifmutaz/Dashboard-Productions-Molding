@@ -20,16 +20,17 @@ export function RateModal({ target, onClose }: { target: RateTarget; onClose: ()
   const { f } = useFilters();
   const { settings: s } = useSession();
   const [k, setK] = useState<RateKey>(target.k ?? 'beki');
+  const params = qs({ from: f.from, to: f.to, shift: f.shift, status: f.status, q: f.q, machineNo: target.machineNo });
   const q = useQuery({
-    queryKey: ['daily-rates', f.from, f.to, f.shift, target.machineNo],
-    queryFn: () => api.get<ViewDataEnvelope<DailyRatesView>>(`/api/v1/monitoring/daily-rates?${qs({ from: f.from, to: f.to, shift: f.shift || undefined, machineNo: target.machineNo ?? undefined })}`),
+    queryKey: ['daily-rates', params],
+    queryFn: ({ signal }) => api.get<ViewDataEnvelope<DailyRatesView>>(`/api/v1/monitoring/daily-rates?${params}`, signal),
   });
   const rows = q.data?.data?.rows ?? [];
   const fld = FIELD[k];
   return (
     <Modal open onClose={onClose} title={`${target.label} — ${MK[k]} by day`} sub={`${rangeTxt(f.from, f.to)}${f.shift ? ` · Shift ${f.shift}` : ''} · target ${s.tgt[k]}%`}>
       <Seg value={k} onChange={setK} items={(Object.keys(MK) as RateKey[]).map((x) => ({ id: x, label: MK[x].replace(' Kadouritsu', '') }))} />
-      <EnvelopeBanner env={q.data} error={q.error} />
+      <EnvelopeBanner env={q.data} error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       <div style={{ margin: 'var(--s-size-12) 0' }}>
         <Chart aria={`${MK[k]} by day`} labels={rows.map((r) => lbl(r.date))} h={200} bw={26} yMax={k === 'beki' ? 120 : 100} yFmt={(v) => Math.round(v) + '%'} vFmt={(v) => f1(v) + '%'}
           bars={[{ name: MK[k], cols: rows.map((r) => colOf(cls(r[fld].value, k, s))), vals: rows.map((r) => r[fld].value) }]}

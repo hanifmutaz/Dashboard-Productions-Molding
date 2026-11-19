@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { PERMISSIONS, type MachineUtilization, type Metric, type UtilizationView } from '@mpd/contracts';
-import { useFilters } from '../lib/filters';
 import { useSession } from '../lib/session';
 import { cls, colOf, delta, mv, Pc, type TargetKey } from '../lib/status';
 import { f1, fmt, tokenColor } from '../lib/format';
@@ -10,7 +9,7 @@ import { EmptyDeck, Kpi, SkelDeck } from '../components/kpi';
 import { DataTable, downloadCsv, type Col } from '../components/table';
 import { Menu, MenuItem, Tabs, useToast } from '../components/ui';
 import { EnvelopeBanner, emptyMsg } from '../components/state';
-import { useMonitoring } from './Production';
+import { useMonitoring } from '../lib/monitoring';
 import { RateModal, type RateTarget } from './RateModal';
 
 function Mini({ label, m, k }: { label: string; m: Metric; k: TargetKey }) {
@@ -28,7 +27,6 @@ function Mini({ label, m, k }: { label: string; m: Metric; k: TargetKey }) {
 
 export function UtilizationPage() {
   const { settings: s, can } = useSession();
-  const { f } = useFilters();
   const nav = useNavigate();
   const toast = useToast();
   const q = useMonitoring<UtilizationView>('utilization');
@@ -57,7 +55,8 @@ export function UtilizationPage() {
     { k: 'ctActual', h: 'CT actual', n: true, cl: 'm', sv: (m) => mv(m.ctActual), f: (m) => (m.ctActual.value === null ? '—' : m.ctActual.value.toFixed(1) + 's') },
   ];
   const exportCsv = () => {
-    downloadCsv(`molding_utilization_${f.from}_${f.to}.csv`, [
+    if (!v || q.isError) return;
+    downloadCsv(`molding_utilization_${v.range.from}_${v.range.to}.csv`, [
       ['Machine', 'DP Name', 'Availability %', 'Performance %', 'Quality %', 'OEE %', 'Kikai %', 'Sogo %', 'Shugyo %', 'Bekidoritsu %', 'CT actual'],
       ...ms.map((m) => ['MC ' + m.machineNo, m.productName, f1(m.availability.value), f1(m.performance.value), f1(m.quality.value), f1(m.oee.value), f1(m.kikai.value), f1(m.sogo.value), f1(m.shugyo.value), f1(m.bekidoritsu.value), m.ctActual.value]),
     ]);
@@ -71,12 +70,12 @@ export function UtilizationPage() {
   return (
     <section className="view on">
       <div className="content">
-        <EnvelopeBanner env={env} error={q.error} />
+        <EnvelopeBanner env={env} error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
         <div className="deck u4">
           {q.isPending ? <SkelDeck n={4} /> : !t ? <EmptyDeck labels={['OEE', 'Kikai Kadouritsu', 'Sogo Kadouritsu', 'Shugyo Kadouritsu']} msg={msg} /> : (
             <>
               <Kpi l="OEE" v={f1(t.oee.value)} u="%" chip="Overall" title={t.oee.reason ?? undefined} g={{ v: t.oee.value, k: 'oee' }}
-                desc={t.oee.value === null ? <span className="fa">{t.oee.reason}</span> : 'Nilai OEE dari ConMas'}
+                desc={t.oee.value === null ? <span className="fa">{t.oee.reason}</span> : 'OEE ConMas · bobot planned minutes bila tersedia'}
                 x={<div className="minis"><Mini label="Availability" m={t.availability} k="avail" /><Mini label="Performance" m={t.performance} k="perf" /><Mini label="Quality" m={t.quality} k="qual" /></div>}
                 d={<>{delta(t.oee.value, p?.oee.value, 'up', true)} {vs}</>} />
               {kpiRate('kikai', 'Kikai Kadouritsu', 'Running time ÷ planned time')}
@@ -144,7 +143,7 @@ export function UtilizationPage() {
         {tab === 'util-2' && (
           <div className="pane on"><div className="card">
             <div className="ch"><div><h3>Machine utilization</h3><p>Click a row for its loss breakdown · click a percentage for daily data</p></div>
-              {can(PERMISSIONS.exportUtilization) && <Menu label="Export ▾"><MenuItem onSelect={exportCsv}>Excel / CSV (filtered)</MenuItem><MenuItem onSelect={() => print()}>Print / PDF</MenuItem></Menu>}
+              {can(PERMISSIONS.exportUtilization) && <Menu label="Export ▾" disabled={!v || q.isError}><MenuItem onSelect={exportCsv}>Excel / CSV (filtered)</MenuItem><MenuItem onSelect={() => print()}>Print / PDF</MenuItem></Menu>}
             </div>
             <div className="cb" style={{ padding: 'var(--s-size-12) 0 0' }}>
               <DataTable wrapClass="tw st1" cols={ucols} rows={ms} rowKey={(m) => m.machineNo} sort={{ k: 'kikai', asc: true }} empty={msg || 'No data for this filter'} onRowClick={(m) => { setSel(m.machineNo); setTab('util-0'); }} />

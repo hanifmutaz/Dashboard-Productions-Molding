@@ -16,14 +16,10 @@ export const mv = (m: Metric | null | undefined) => (m ? m.value : null);
 export function Pc({ m, k, s, onClick }: { m: Metric; k: TargetKey; s: Settings; onClick?: () => void }) {
   if (m.value === null) return <span className="fa" title={m.reason ?? undefined}>—</span>;
   const c = cls(m.value, k, s);
-  return (
-    <span
-      className={`pct ${c}${onClick ? ' lk' : ''}`}
-      {...(onClick ? { role: 'button', tabIndex: 0, onClick: (e) => { e.stopPropagation(); onClick(); }, onKeyDown: (e) => { if (e.key === 'Enter') onClick(); } } : {})}
-    >
-      {c === 'lo' ? '▼ ' : ''}{f1(m.value)}%
-    </span>
-  );
+  const text = `${c === 'lo' ? '▼ ' : c === 'mid' ? '▽ ' : ''}${f1(m.value)}%`;
+  return onClick
+    ? <button type="button" className={`pct ${c} lk`} onClick={(e) => { e.stopPropagation(); onClick(); }}>{text}</button>
+    : <span className={`pct ${c}`}>{text}</span>;
 }
 
 export function delta(c: number | null | undefined, p: number | null | undefined, good: 'up' | 'down' | 'flat', pt = false): ReactNode {

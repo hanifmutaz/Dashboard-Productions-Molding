@@ -6,11 +6,12 @@ import { expect, test, type Page } from '@playwright/test';
  * Step 2: later runs fail on visual regressions against the approved baseline. */
 
 const me = { kind: 'user', csrfToken: 't', user: { id: 'u1', username: 'viewer', displayName: 'Test User', department: 'Kaizen Section', roleId: 'r1', roleName: 'Administrator', lastLoginAt: null,
-  permissions: ['monitoring.production.view', 'monitoring.utilization.view', 'monitoring.stoptime.view', 'analysis.machinedetail.view', 'settings.view', 'monitoring.sales.view', 'monitoring.scrap.view', 'masterdata.view'] } };
+  permissions: ['monitoring.production.view', 'monitoring.utilization.view', 'monitoring.stoptime.view', 'analysis.machinedetail.view', 'settings.view', 'monitoring.sales.view', 'monitoring.scrap.view', 'masterdata.view', 'export.production'] } };
 const env = (data: unknown, state = 'current') => ({ state, data, freshness: 'not-applicable', sourceUpdatedAt: '2026-11-07T08:00:00+07:00', generatedAt: '2026-11-07T08:05:00+07:00', notices: [] });
 const metric = (v: number | null) => (v === null ? { value: null, reason: 'Rumus belum disetujui (Q-003)' } : { value: v, reason: null });
 
-async function stub(page: Page) {
+async function stub(page: Page, shiftGate?: Promise<void>) {
+  await page.clock.setFixedTime(new Date('2026-11-07T10:00:00+07:00'));
   await page.route('**/api/auth/me', (r) => r.fulfill({ json: me }));
   await page.route('**/api/me/preferences', (r) => r.fulfill({ json: { page: 'prod', period: 'lw_tw', shift: '', theme: 'light', side: '', motion: 'off', cols: [] } }));
   await page.route('**/api/settings', async (r) => {
@@ -21,13 +22,23 @@ async function stub(page: Page) {
     machineNo: String(20 + i), dpNo: `DP-${1001 + i}`, productName: `PART ${i + 1}`, plan: 10000, actual: 7000 + i * 600, gross: 7200 + i * 600, reject: 200, deviation: -3000 + i * 600,
     bekidoritsu: metric(70 + i * 6), ipr: metric(28000), stopMinutes: 120 + i * 10, sharePct: metric(16), rejectPct: metric(2.7), rejects: [{ name: 'Burry', qty: 200 }], achievement: 'attention',
   }));
-  await page.route('**/api/v1/monitoring/production**', (r) => r.fulfill({ json: env({
+  await page.route('**/api/v1/monitoring/production**', async (r) => {
+    const shift = new URL(r.request().url()).searchParams.get('shift');
+    if (shift === '2' && shiftGate) await shiftGate;
+    await r.fulfill({ json: env({
     range: { from: '2026-10-26', to: '2026-11-07', shift: null, days: 13 },
-    totals: { plan: 60000, actual: 49000, gross: 50200, reject: 1200, bekidoritsu: metric(81.7), deviation: -11000, ipr: metric(24490), stopMinutes: 870 }, previous: null,
+    totals: { plan: 60000, actual: shift === '2' ? 9000 : 49000, gross: 50200, reject: 1200, bekidoritsu: metric(81.7), deviation: -11000, ipr: metric(24490), stopMinutes: 870 }, previous: null,
     machines, daily: Array.from({ length: 13 }, (_, i) => ({ date: `2026-${i < 6 ? '10' : '11'}-${String(i < 6 ? 26 + i : i - 5).padStart(2, '0')}`, plan: i % 7 === 6 ? 0 : 5000, actual: i % 7 === 6 ? 0 : 4100, bekidoritsu: metric(i % 7 === 6 ? null : 82) })),
     groups: [{ group: 'A', plan: 30000, actual: 25000, bekidoritsu: metric(83.3) }, { group: 'B', plan: 30000, actual: 24000, bekidoritsu: metric(80) }],
+    }) });
+  });
+  await page.route('**/api/v1/monitoring/sales**', (r) => r.fulfill({ json: env({
+    range: { from: '2026-10-26', to: '2026-11-07', days: 13 },
+    total: metric(1200000), goodQty: 12000, coveredQty: 12000, uncoveredQty: 0, averagePrice: metric(100),
+    byMonth: [{ key: '2026-11', sales: 1200000, goodQty: 12000, uncoveredQty: 0, hasValuation: true }],
+    byDay: [{ key: '2026-11-07', sales: 1200000, goodQty: 12000, uncoveredQty: 0, hasValuation: true }],
+    byPart: [{ dpNo: 'DP-1001', productName: 'PART 1', goodQty: 12000, pricePerPcs: 100, sales: metric(1200000) }],
   }) }));
-  await page.route('**/api/v1/monitoring/sales**', (r) => r.fulfill({ json: { ...env(null, 'unavailable'), notices: [{ code: 'Q-009', message: 'Rumus, sumber harga dan approver Sales/Scrap belum ditetapkan.' }] } }));
 }
 
 for (const path of ['/production', '/sales']) {
@@ -55,4 +66,83 @@ test('NFR-UI: touch targets ≥ 44px and text ≥ 12px on iPad', async ({ page }
   expect(small).toEqual([]);
   const tiny = await page.$$eval('body *', (els) => els.filter((e) => (e as HTMLElement).offsetParent && e.childNodes.length && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent?.trim()) && parseFloat(getComputedStyle(e).fontSize) < 12).map((e) => e.tagName + '.' + e.className));
   expect(tiny).toEqual([]);
+});
+
+test('UI behavior · selection hides previous results and disables exports', async ({ page }) => {
+  let resume!: () => void;
+  const hold = new Promise<void>((resolve) => { resume = resolve; });
+  await stub(page, hold);
+  await page.goto('/production');
+  const actual = page.locator('.deck .kpi').nth(1);
+  await expect(actual).toContainText('49,000');
+  await page.getByRole('tab', { name: 'Daily trend' }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: 'By machine' })).toBeFocused();
+  await page.locator('#fShift').selectOption('2');
+  try {
+    await expect(page.getByRole('button', { name: /Export/ })).toBeDisabled();
+    await expect(page.getByText('49,000', { exact: true })).toHaveCount(0);
+  } finally { resume(); }
+  await expect(actual).toContainText('9,000');
+  await expect(page.getByRole('button', { name: /Export/ })).toBeEnabled();
+});
+
+test('UI behavior · drill-down preserves machine scope', async ({ page }) => {
+  await stub(page);
+  await page.route('**/api/v1/monitoring/daily-rates**', (r) => r.fulfill({ json: env(null, 'empty') }));
+  await page.goto('/production');
+  await page.locator('#fStatus').selectOption('attention');
+  const scoped = page.waitForResponse((response) => response.url().includes('/monitoring/production') && new URL(response.url()).searchParams.get('q') === 'DP-1001');
+  await page.locator('#fSearch').fill('DP-1001');
+  await scoped;
+  const request = page.waitForRequest((r) => r.url().includes('/monitoring/daily-rates'));
+  await page.locator('.deck .kpi').nth(2).click();
+  const params = new URL((await request).url()).searchParams;
+  expect(params.get('q')).toBe('DP-1001');
+  expect(params.get('status')).toBe('attention');
+  await expect(page.getByRole('dialog')).toBeVisible();
+});
+
+test('UI behavior · navigation stays in the phone viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await stub(page);
+  await page.goto('/production');
+  await expect(page.locator('.deck .kpi').nth(1)).toContainText('49,000');
+  await expect(page.locator('#app-navigation')).toHaveAttribute('inert', '');
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  await expect(page.getByRole('link', { name: 'Production', exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Open menu' })).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('UI behavior · Sales exposes period and shift', async ({ page }) => {
+  await stub(page);
+  await page.goto('/sales');
+  await expect(page.locator('#fShift')).toBeVisible();
+  await expect(page.locator('#fStatus')).toHaveCount(0);
+  await expect(page.getByText('Periode ini dinilai dengan harga part yang berlaku saat laporan dimuat.')).toBeVisible();
+});
+
+test('UI behavior · Machine Detail fits beside the full sidebar', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await stub(page);
+  await page.route('**/api/me/preferences', (r) => r.fulfill({ json: { page: 'prod', period: 'lw_tw', shift: '', theme: 'light', side: 'full', motion: 'off', cols: [] } }));
+  await page.route('**/api/v1/machines?**', (r) => r.fulfill({ json: env({ date: '2026-11-07', prevDate: null, nextDate: null, machines: [{ machineNo: '20' }] }) }));
+  await page.route('**/api/v1/machine-detail/20?**', (r) => r.fulfill({ json: env({
+    machineNo: '20', date: '2026-11-07', prevDate: null, nextDate: null, hasRecord: true,
+    header: { dpNo: 'DP-1001', productName: 'LONG PRODUCT NAME FOR TEST', poNo: '01', cavity: '4', ctPlan: metric(10), ctActual: metric(10) },
+    personnel: [], shifts: [], stops: [], stopCategories: [],
+    totals: { plan: 100000, actual: 120000, gross: 122000, reject: 2000, deviation: 20000, ipr: metric(16667), stopMinutes: 0, bekidoritsu: metric(120), oee: metric(60) },
+    hourly: { available: false, reason: 'Fixture' }, rejectPareto: [],
+  }) }));
+  await page.goto('/machines/20');
+  const figures = page.locator('#mdHost .page.on .figs');
+  await expect(figures).toContainText('120,000');
+  const bounds = await figures.evaluate((element) => {
+    const parent = element.closest('.hero')!.getBoundingClientRect();
+    const children = [...element.querySelectorAll('.fig')];
+    return { fits: children.every((child) => child.getBoundingClientRect().right <= parent.right + 1), figures: children.length };
+  });
+  expect(bounds).toEqual({ fits: true, figures: 6 });
 });

@@ -32,8 +32,10 @@ a.ni.on{color:var(--ink)}
 .mdcount{font-size:var(--s-size-12);color:var(--muted);margin:calc(var(--s-size-4) * -1) 0 var(--s-size-8)}
 .mdgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--s-size-190)),1fr))}
 .mdc{container-type:inline-size}
-.mdc .h{flex-wrap:wrap;row-gap:var(--s-size-4)}
-.mdc .h b,.mdc .h .chip{white-space:nowrap}
+.mdc .h{display:grid;grid-template-rows:auto minmax(var(--s-size-20),auto);justify-items:start;align-items:start;row-gap:var(--s-size-4)}
+.mdc .h .chip{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.mdc-data-note{min-block-size:2.5em;color:var(--muted);font-size:var(--s-size-12);line-height:1.25;text-align:center;overflow-wrap:anywhere}
+.mdc .mf{margin-top:auto}
 .mdc .mf div{min-width:0}
 @container (max-width:200px){
   .mdc .h b{font-size:var(--s-size-16)}
@@ -50,3 +52,56 @@ a.ni.on{color:var(--ink)}
   .mdtools,.mdday{width:100%;justify-content:space-between}
 }
 @media(max-width:360px){.mdgrid{grid-template-columns:1fr}}
+
+.sort-control{width:100%;font:inherit;color:inherit;text-align:inherit;background:none;border:0;padding:0;cursor:pointer}
+button.pct.lk{border:0;font:inherit}
+#mdHost{container-type:inline-size}
+@media(max-width:900px){
+  .topbar{gap:var(--s-size-6);padding-inline:var(--s-size-10)}
+  .crumb{min-width:0;overflow:hidden}
+  .crumb .c1,.crumb .sl{display:none}
+  .crumb .c2{overflow:hidden;text-overflow:ellipsis}
+  .tr{gap:var(--s-size-4);min-width:0}
+  .conn{min-width:0;max-width:var(--s-size-160);padding-inline:var(--s-size-6)}
+  .conn>span{overflow:hidden;text-overflow:ellipsis}
+  .filters>.f{min-width:0;max-width:100%}
+  .filters .fin,.filters .pbtn{min-width:0;max-width:100%;white-space:normal}
+  .tabsrow .tabs{max-width:100%;flex-wrap:wrap;gap:var(--s-size-6)}
+  .ch,.phead,.ssave,.ssave>span{flex-wrap:wrap}
+  .ch input{max-width:100%}
+  .foot{flex-wrap:wrap;gap:var(--s-size-8)}
+  .pop{max-width:calc(100vw - 48px)}
+  .deck:not(.u4)>.kpi{min-width:0}
+}
+@media(pointer:coarse){
+  .btn,.tbtn,.tab,.fin,.reset,.ni,.lnk,[role=switch],.sort-control{min-height:var(--c-touch-target)}
+  .tbtn,.reset,.sort-control{min-width:var(--c-touch-target)}
+}
+
+/* Settings, account administration, kiosk administration and status views. */
+.snav.settings-sections{padding:var(--s-size-8)}
+.settings-sections button{width:100%;min-height:var(--c-touch-target);padding:var(--s-size-7) var(--s-size-10);text-align:left;border:0;border-left:var(--s-size-2) solid transparent;border-radius:var(--r-sm);background:none;color:var(--muted);font:inherit}
+.settings-sections button[aria-pressed=true]{background:var(--primary-soft);border-left-color:var(--primary);color:var(--primary);font-weight:var(--c-font-weight-600)}
+@media(hover:hover){.settings-sections button:hover{background:var(--surface-3);color:var(--ink)}}
+.settings-section[hidden]{display:none}
+.settings-actions,.accounts-tools,.kiosk-admin-actions{display:flex;align-items:flex-end;gap:var(--s-size-8);flex-wrap:wrap}
+.accounts-tools .fld{width:min(var(--s-size-220),100%)}
+.accounts-content .tabsrow{align-items:flex-end}
+.kiosk-admin-layout{grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);align-items:start}
+.kiosk-pair-form,.pairing-result{display:grid;gap:var(--s-size-8)}
+.kiosk-pair-form>.btn{justify-self:start}
+.pairing-result{margin-top:var(--s-size-12);overflow-wrap:anywhere}
+.pairing-result strong{font-size:var(--s-size-22);letter-spacing:.08em}
+.kiosk-admin-actions{justify-content:flex-end;margin-top:var(--s-size-12)}
+.system-status-list{margin:0}
+.system-status-list>div{display:flex;justify-content:space-between;align-items:center;gap:var(--s-size-12);padding:var(--s-size-10) 0}
+.system-status-list>div+div{border-top:var(--s-size-1) solid var(--line)}
+.system-status-list dd{margin:0}
+.source-banner{display:flex;justify-content:space-between;align-items:center;gap:var(--s-size-8) var(--s-size-14);flex-wrap:wrap}
+.source-banner strong{display:block}
+.problem-message{display:grid;gap:var(--s-size-8);padding:var(--s-size-16);text-align:left}
+.problem-message p{margin:0;color:var(--muted)}
+.problem-actions{display:flex;gap:var(--s-size-8);flex-wrap:wrap;margin-top:var(--s-size-4)}
+.problem-message>.btn{justify-self:start}
+@media(max-width:1100px){.snav.settings-sections{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.kiosk-admin-layout{grid-template-columns:minmax(0,1fr)}}

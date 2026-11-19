@@ -17,20 +17,26 @@ export function masterDataRoutes(repos: Repos, conmas: ConmasSource, audit: Audi
   r.put('/master-data/part-prices', requirePermission(PERMISSIONS.editMasterData), async (req, res) => {
     const me = userOf(req);
     const b = parse(PartPriceUpdateSchema, req.body);
-    const failed = await repos.master.upsertPartPrices(b.items, me.id);
-    if (failed.length) throw conflictError(failed);
+    const result = await repos.transaction(async () => {
+      const failed = await repos.master.upsertPartPrices(b.items, me.id);
+      if (failed.length) throw conflictError(failed);
+      await audit(req, { action: 'masterdata.part-prices.update', result: 'success', objectType: 'md_part', after: { count: b.items.length, items: b.items.slice(0, 200) } });
+      return repos.master.parts();
+    });
     onChange();
-    await audit(req, { action: 'masterdata.part-prices.update', result: 'success', objectType: 'md_part', after: { count: b.items.length, items: b.items.slice(0, 200) } });
-    res.json(await repos.master.parts());
+    res.json(result);
   });
   r.put('/master-data/materials', requirePermission(PERMISSIONS.editMasterData), async (req, res) => {
     const me = userOf(req);
     const b = parse(MaterialUpdateSchema, req.body);
-    const failed = await repos.master.upsertMaterials(b.materials, b.partMaterials, me.id);
-    if (failed.length) throw conflictError(failed);
+    const result = await repos.transaction(async () => {
+      const failed = await repos.master.upsertMaterials(b.materials, b.partMaterials, me.id);
+      if (failed.length) throw conflictError(failed);
+      await audit(req, { action: 'masterdata.materials.update', result: 'success', objectType: 'md_material', after: { materials: b.materials, partMaterials: b.partMaterials.length } });
+      return { materials: await repos.master.materials(), parts: await repos.master.parts() };
+    });
     onChange();
-    await audit(req, { action: 'masterdata.materials.update', result: 'success', objectType: 'md_material', after: { materials: b.materials, partMaterials: b.partMaterials.length } });
-    res.json({ materials: await repos.master.materials(), parts: await repos.master.parts() });
+    res.json(result);
   });
 
   /* ---- Stop categories & details: dedicated permission so Super admin can grant it to specific roles ---- */
@@ -46,29 +52,37 @@ export function masterDataRoutes(repos: Repos, conmas: ConmasSource, audit: Audi
   const dedupe = (l: string[]) => { const seen = new Set<string>(); return l.filter((x) => { const k = x.toLowerCase(); return seen.has(k) ? false : (seen.add(k), true); }); };
   r.put('/master-data/stop-categories', requirePermission(PERMISSIONS.editStopCategories), async (req, res) => {
     const b = parse(StopCategoryInputSchema, req.body);
-    const all = await repos.master.categories();
-    const before = b.id ? all.find((c) => c.id === b.id) : undefined;
-    if (b.id && !before) throw notFound('Kategori stop');
-    const id = b.id ?? slug(b.short, new Set(all.map((c) => c.id)));
-    const next = { ...b, id, aliases: dedupe(b.aliases), details: dedupe(b.details), notes: b.notes || null };
-    const mine = new Set(keysOf(next));
-    const clash = all.filter((c) => c.id !== id).find((c) => keysOf(c).some((k) => mine.has(k)));
-    if (clash) throw new HttpError(409, 'CATEGORY_NAME_CONFLICT', `Nama atau alias bentrok dengan kategori “${clash.name}”. Setiap nama/alias ConMas hanya boleh dimiliki satu kategori.`);
-    if (!(await repos.master.saveCategory(next))) throw conflictError([id]);
+    const result = await repos.transaction(async () => {
+      await repos.master.lockCategories();
+      const all = await repos.master.categories();
+      const before = b.id ? all.find((c) => c.id === b.id) : undefined;
+      if (b.id && !before) throw notFound('Kategori stop');
+      const id = b.id ?? slug(b.short, new Set(all.map((c) => c.id)));
+      const next = { ...b, id, aliases: dedupe(b.aliases), details: dedupe(b.details), notes: b.notes || null };
+      const mine = new Set(keysOf(next));
+      const clash = all.filter((c) => c.id !== id).find((c) => keysOf(c).some((k) => mine.has(k)));
+      if (clash) throw new HttpError(409, 'CATEGORY_NAME_CONFLICT', `Nama atau alias bentrok dengan kategori “${clash.name}”. Setiap nama/alias ConMas hanya boleh dimiliki satu kategori.`);
+      if (!(await repos.master.saveCategory(next))) throw conflictError([id]);
+      const after = (await repos.master.categories()).find((c) => c.id === id);
+      await audit(req, { action: before ? 'masterdata.stop-category.update' : 'masterdata.stop-category.create', result: 'success', objectType: 'md_stop_category', objectId: id, before, after });
+      return repos.master.categories();
+    });
     onChange();
-    const after = (await repos.master.categories()).find((c) => c.id === id);
-    await audit(req, { action: before ? 'masterdata.stop-category.update' : 'masterdata.stop-category.create', result: 'success', objectType: 'md_stop_category', objectId: id, before, after });
-    res.json(await repos.master.categories());
+    res.json(result);
   });
   r.delete('/master-data/stop-categories/:id', requirePermission(PERMISSIONS.editStopCategories), async (req, res) => {
     const id = String(req.params.id), version = Number(req.query.version);
     if (!Number.isInteger(version)) throw new HttpError(400, 'BAD_REQUEST', 'Parameter version wajib diisi.');
-    const before = (await repos.master.categories()).find((c) => c.id === id);
-    if (!before) throw notFound('Kategori stop');
-    if (!(await repos.master.deleteCategory(id, version))) throw conflictError([id]);
+    const result = await repos.transaction(async () => {
+      await repos.master.lockCategories();
+      const before = (await repos.master.categories()).find((c) => c.id === id);
+      if (!before) throw notFound('Kategori stop');
+      if (!(await repos.master.deleteCategory(id, version))) throw conflictError([id]);
+      await audit(req, { action: 'masterdata.stop-category.delete', result: 'success', objectType: 'md_stop_category', objectId: id, before });
+      return repos.master.categories();
+    });
     onChange();
-    await audit(req, { action: 'masterdata.stop-category.delete', result: 'success', objectType: 'md_stop_category', objectId: id, before });
-    res.json(await repos.master.categories());
+    res.json(result);
   });
   return r;
 }

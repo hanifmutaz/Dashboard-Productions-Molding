@@ -17,3 +17,7 @@ Kolom "Evidence" diisi dari hasil nyata Playwright + review side-by-side. Saat i
 | Profile | akun, akses, preferensi, ganti password, aktivitas | | | | NOT VERIFIED |
 | Kiosk/TV | rotasi halaman, tema TV, kbar, Esc | | | | NOT VERIFIED |
 | NFR-UI | target sentuh ≥ 44 px, teks ≥ 12 px (test otomatis) | — | | | NOT VERIFIED |
+
+## Pengujian perilaku
+
+Suite `npm run test:visual -- --grep 'UI behavior'` menguji perubahan filter tertunda, kontrol ekspor, cakupan modal, fokus keyboard, dan reflow pada Chromium serta WebKit. Snapshot tetap memerlukan pengambilan baseline dan review per area sebelum dinyatakan sesuai mockup. Uji perangkat fisik dan TV dicatat terpisah.

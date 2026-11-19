@@ -1,0 +1,22 @@
+name: Verify dashboard
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm install --global npm@12.0.2
+      - run: npm ci
+      - run: npm run verify
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run test:visual -- --grep 'UI behavior'

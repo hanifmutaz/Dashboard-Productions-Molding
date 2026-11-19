@@ -17,7 +17,8 @@ Daftar field: **FINAL** (Excel owner). Arti domain tiap baris: **PROPOSED** samp
 | DP no / Produk / PO | cluster_1_9_t / 1_18_t / 1_19_t | | PROPOSED |
 | CT actual | cluster_1_32_n | CT plan tidak ada di sumber | PROPOSED |
 | Waktu terencana | cluster_1_975_n PROD OPT TIME | view 2026-11-18: sebelumnya 1_982_n; dipakai Kikai/Sogo/Shugyo | PROPOSED |
-| Leader / Cell / Teknisi / Operator | 1_6_t / 1_7_t / 1_24_t / 1_25_t | NIK; nama = Q-021 | PROPOSED |
+| Leader / Cell / Teknisi / Operator | 1_6_t / 1_7_t / 1_24_t / 1_25_t | NIK dari baris shift yang sama dengan nama | PROPOSED |
+| Nama Leader / Cell Leader / Teknisi / Operator | 1_15_t / 1_16_t / 1_33_t / 1_34_t | Nomor field mengikuti tabel pemilik. Nama fisik masing-masing bisa disetel lewat CONMAS_COL_LEADER_NAME, CONMAS_COL_CELL_LEADER_NAME, CONMAS_COL_TECHNICIAN_NAME, CONMAS_COL_OPERATOR_NAME. Kolom nama yang belum masuk view dilewati. | OPSIONAL |
 | 12 blok jam × 5 slot (label JAM kini 1_49_t, 1_126_t, …) | JAM, QTY PCS, MENIT, KATEGORI, DETAIL, REJECT, QTY REJECT | label KATEGORI "06.00-07.00" diabaikan; jam dari label JAM | PROPOSED |
 | Stop (loss) | Σ MENIT slot dengan kategori non-info | "Informasi" tidak dihitung loss | PROPOSED |
 | OEE / Availability / Performance ConMas | 1_36_n / 1_37_n / 1_38_n (view 2026-11-18: OEE, AVAILIBILITY, PERFORMANCE; sebelumnya 1_39..1_41) | owner 2026-11-17: dipakai langsung dari ConMas. Dikonfigurasi lewat `CONMAS_COL_OEE/AVAILABILITY/PERFORMANCE`; kolom yang tidak ada di view dilewati (angka tampil "—"). Skala: `CONMAS_RATE_SCALE` (percent/fraction). Agregasi antar record: DEV-018 | PROPOSED · VERIFIKASI NAMA KOLOM & SKALA |

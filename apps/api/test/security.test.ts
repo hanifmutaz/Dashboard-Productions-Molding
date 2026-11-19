@@ -142,3 +142,15 @@ describe('stop categories & details editing (dedicated permission)', () => {
     await a.agent.delete('/api/master-data/stop-categories/pm?version=0').set('Origin', ORIGIN).set('X-CSRF-Token', a.csrf).expect(404);
   });
 });
+
+describe('release readiness', () => {
+  it('keeps liveness up and gates app traffic when the required schema is unavailable', async () => {
+    ctx.repos.schemaReady = () => Promise.resolve(false);
+    const pending = createApp({ repos: ctx.repos, conmas: downConmas, log: pino({ level: 'silent' }), publicOrigin: ORIGIN, cookieSecure: false, idleMinutes: 60, absoluteHours: 12, trustProxy: false, tzOffsetMinutes: 420, version: 't', requiredMigrations: ['004_auth_attempt_window.sql'] });
+    await request(pending).get('/api/health').expect(200);
+    const readiness = await request(pending).get('/api/health/ready').expect(503);
+    expect(readiness.body).toMatchObject({ status: 'not-ready', schema: 'not-ready' });
+    const settings = await request(pending).get('/api/settings').expect(503);
+    expect(settings.body).toMatchObject({ error: { code: 'SCHEMA_NOT_READY' } });
+  });
+});

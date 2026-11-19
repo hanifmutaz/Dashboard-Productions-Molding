@@ -105,7 +105,7 @@
   --p-summary-r-sm:5px;
   --p-summary-sbw:232px;
   --p-summary-top:56px;
-  --p-summary-font:'Segoe UI',system-ui,-apple-system,Arial,sans-serif;
+  --p-summary-font:'Segoe UI',Arial,sans-serif;
   --p-rgba-rgba-15-23-42-05:rgba(15,23,42,.05);
   --p-summary-sh-1:0 1px 2px rgba(15,23,42,.05);
   --p-rgba-rgba-15-23-42-18:rgba(15,23,42,.18);
@@ -123,7 +123,7 @@
   --p-machine-r:8px;
   --p-machine-r-in:6px;
   --p-machine-r-sm:4px;
-  --p-machine-font:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
+  --p-machine-font:'Segoe UI',Arial,sans-serif;
   --p-touch-target:44px;
   --p-control-border-existing:#899398;
   --p-size-8:8px;

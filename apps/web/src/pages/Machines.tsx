@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import type { MachineListView, MachineSummary, Settings, ViewDataEnvelope } from '@mpd/contracts';
 import { api, qs } from '../lib/api';
-import { useReportSource } from '../lib/filters';
+import { useFilters, useReportSource } from '../lib/filters';
 import { useSession } from '../lib/session';
 import { cls, colOf } from '../lib/status';
 import { DOW, f1, fmt, lblY, pd } from '../lib/format';
@@ -15,9 +15,8 @@ function useMachineList(date: string | null) {
   const { settings } = useSession();
   return useQuery({
     queryKey: ['machines', date],
-    queryFn: () => api.get<ViewDataEnvelope<MachineListView>>(`/api/v1/machines?${qs({ date })}`),
+    queryFn: ({ signal }) => api.get<ViewDataEnvelope<MachineListView>>(`/api/v1/machines?${qs({ date })}`, signal),
     refetchInterval: settings.data.refresh * 60_000,
-    placeholderData: (prev) => prev,
   });
 }
 
@@ -36,24 +35,39 @@ function Gauge({ v, tg, col }: { v: number; tg: number; col: string }) {
 
 function Card({ m, onOpen }: { m: MachineSummary; onOpen: () => void }) {
   const { settings: s } = useSession();
-  const tg = s.tgt.beki, b = m.bekidoritsu.value;
-  if (!m.hasRecord || b === null) {
-    return (
-      <button type="button" className="mdc off" style={{ ['--sc' as string]: 'var(--line-2)' }} onClick={onOpen}>
-        <div className="h"><b>MC {m.machineNo}</b><span className="chip">{m.hasRecord ? 'Plan = 0' : 'No data'}</span></div>
-        <div className="p">{m.productName ?? '—'}</div>
-        <div className="gw"><Gauge v={0} tg={tg} col="" /><div className="gv"><span className="fa">—</span><small>{m.hasRecord ? m.bekidoritsu.reason : 'Tidak ada catatan produksi'}</small></div></div>
-        <div className="mf"><div><span>OEE</span>{m.oee.value === null ? '—' : <b>{f1(m.oee.value)}<i>%</i></b>}</div><div><span>Stop</span>{m.stopMinutes == null ? '—' : <b>{fmt(m.stopMinutes)}<i> min</i></b>}</div><div><span>Reject</span>{fmt(m.reject)}</div></div>
-      </button>
-    );
-  }
-  const c = cls(b, 'beki', s), col = colOf(c);
+  const target = s.tgt.beki;
+  const beki = m.hasRecord ? m.bekidoritsu.value : null;
+  const status = cls(beki, 'beki', s);
+  const color = beki === null ? 'var(--line-2)' : colOf(status);
+  const badgeTone = beki === null ? '' : status === 'ok' ? 'good' : status === 'mid' ? 'warn' : 'bad';
+  const badgeLabel = beki === null
+    ? (m.hasRecord ? 'Capaian belum tersedia' : 'No data')
+    : (status === 'ok' ? 'On target' : status === 'mid' ? 'Below' : 'Far below') + ' · '
+      + (beki >= target ? '+' : '−') + f1(Math.abs(beki - target)) + ' pt';
+  const dataNote = !m.hasRecord ? 'Tidak ada catatan produksi'
+    : beki === null ? m.bekidoritsu.reason : null;
+
   return (
-    <button type="button" className="mdc" style={{ ['--sc' as string]: col }} onClick={onOpen} title={`Open dashboard MC ${m.machineNo}`}>
-      <div className="h"><b>MC {m.machineNo}</b><span className={`chip ${c === 'ok' ? 'good' : c === 'mid' ? 'warn' : 'bad'}`}>{c === 'ok' ? 'On target' : c === 'mid' ? 'Below' : 'Far below'} · {(b - tg >= 0 ? '+' : '−') + f1(Math.abs(b - tg))} pt</span></div>
-      <div className="p">{m.productName}</div>
-      <div className="gw"><Gauge v={b} tg={tg} col={col} /><div className="gv"><span style={{ color: col }}>{f1(b)}<i>%</i></span><small>Bekidoritsu</small></div></div>
-      <div className="mf"><div><span>OEE</span><b title={m.oee.reason ?? undefined}>{m.oee.value === null ? '—' : <>{f1(m.oee.value)}<i>%</i></>}</b></div><div><span>Stop</span><b>{fmt(m.stopMinutes)}<i> min</i></b></div><div><span>Reject</span><b>{fmt(m.reject)}</b></div></div>
+    <button type="button" className={beki === null ? 'mdc off' : 'mdc'} style={{ ['--sc' as string]: color }}
+      onClick={onOpen} title={'Open dashboard MC ' + m.machineNo}>
+      <div className="h">
+        <b>MC {m.machineNo}</b>
+        <span className={'chip ' + badgeTone}>{badgeLabel}</span>
+      </div>
+      <div className="p" title={m.productName ?? undefined}>{m.productName ?? '—'}</div>
+      <div className="gw">
+        <Gauge v={beki ?? 0} tg={target} col={color} />
+        <div className="gv">
+          {beki === null ? <span className="fa">—</span> : <span style={{ color }}>{f1(beki)}<i>%</i></span>}
+          <small>Bekidoritsu</small>
+        </div>
+      </div>
+      <small className="mdc-data-note">{dataNote}</small>
+      <div className="mf">
+        <div><span>OEE</span><b title={m.oee.reason ?? undefined}>{m.oee.value === null ? '—' : <>{f1(m.oee.value)}<i>%</i></>}</b></div>
+        <div><span>Stop</span><b>{m.stopMinutes == null ? '—' : <>{fmt(m.stopMinutes)}<i> min</i></>}</b></div>
+        <div><span>Reject</span><b>{fmt(m.reject)}</b></div>
+      </div>
     </button>
   );
 }
@@ -91,7 +105,8 @@ export function MachineListPage() {
   const { settings: s } = useSession();
   const nav = useNavigate();
   const [sp, setSp] = useSearchParams();
-  const date = sp.get('date');
+  const { today } = useFilters();
+  const date = sp.get('date') ?? today;
   const q = useMachineList(date);
   useReportSource(q.data, q.isPending, q.isError);
   const [init] = useState(loadFilters);
@@ -105,7 +120,8 @@ export function MachineListPage() {
   const v = q.data?.data ?? null;
   const all = v?.machines ?? [];
   const run = all.filter((m) => m.hasRecord);
-  const below = run.filter((m) => cls(m.bekidoritsu.value, 'beki', s) !== 'ok');
+  const below = run.filter((m) => m.bekidoritsu.value !== null && m.bekidoritsu.value < s.tgt.beki);
+  const unknown = run.filter((m) => m.bekidoritsu.value === null).length;
   const count = (st: Status) => (st === 'all' ? all.length : all.filter((m) => statusOf(m, s) === st).length);
   const text = search.trim().toLowerCase();
   let list = all.filter((m) => (status === 'all' || statusOf(m, s) === status) && (!text || `mc ${m.machineNo} mc${m.machineNo} ${m.productName ?? ''} ${m.dpNo ?? ''}`.toLowerCase().includes(text)));
@@ -116,11 +132,11 @@ export function MachineListPage() {
   return (
     <section className="view on">
       <div className="content">
-        <EnvelopeBanner env={q.data} error={q.error} />
+        <EnvelopeBanner env={q.data} error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
         {!v ? <div className="card empty" role="status">{q.isPending ? 'Memuat daftar mesin…' : 'Sumber data tidak tersedia. Angka mesin disembunyikan.'}</div> : (
           <>
             <div className="card"><div className="strip-note">
-              <span><span className="dot" style={{ background: 'var(--primary)' }} /><b>{run.length}</b> dari {v.machines.length} mesin dengan catatan produksi (bukan status Running) · <b className={below.length ? 'bad' : 'good'}>{below.length}</b> di bawah target Bekidoritsu {s.tgt.beki}% · pilih mesin untuk membuka dashboard</span>
+              <span><span className="dot" style={{ background: 'var(--primary)' }} /><b>{run.length}</b> dari {v.machines.length} mesin dengan catatan produksi (bukan status Running) · <b className={below.length ? 'bad' : 'good'}>{below.length}</b> di bawah target Bekidoritsu {s.tgt.beki}% · {unknown} capaian belum tersedia · pilih mesin untuk membuka dashboard</span>
               <span className="mdtools">
                 <span className="mdday">
                   <button className="btn" type="button" aria-label="Previous day" disabled={!v.prevDate} onClick={() => v.prevDate && setDate(v.prevDate)}>‹</button>
@@ -151,13 +167,14 @@ export function MachineListPage() {
 }
 
 export function MachineDetailPage() {
+  const { today } = useFilters();
   const { settings } = useSession();
   const { machineNo = '' } = useParams();
   const [sp, setSp] = useSearchParams();
   const nav = useNavigate();
   const ipad = sp.get('ipad') === '1';
   const date = sp.get('date');
-  const list = useMachineList(date);
+  const list = useMachineList(date ?? today);
   useEffect(() => {
     document.body.classList.toggle('md-ipad', ipad);
     return () => document.body.classList.remove('md-ipad');
@@ -165,7 +182,7 @@ export function MachineDetailPage() {
   const set = (o: Record<string, string | null>) => setSp(qs({ date, ipad: ipad ? '1' : null, ...o }));
   return (
     <section className="view on" id="v-detail">
-      <MachineDashboard machineNo={machineNo} date={date} settings={settings} ipad={ipad}
+      <MachineDashboard machineNo={machineNo} date={date ?? today} settings={settings} ipad={ipad}
         machines={list.data?.data?.machines.map((m) => m.machineNo)}
         onMachine={(mc) => void nav(`/machines/${encodeURIComponent(mc)}?${qs({ date, ipad: ipad ? '1' : null })}`)}
         onDate={(d) => set({ date: d })} onBack={() => void nav(`/machines?${qs({ date })}`)} onIpad={(on) => set({ ipad: on ? '1' : null })} />

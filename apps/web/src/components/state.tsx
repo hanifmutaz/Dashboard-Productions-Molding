@@ -2,20 +2,39 @@ import type { ReactNode } from 'react';
 import type { ViewDataEnvelope } from '@mpd/contracts';
 import { ApiFailure } from '../lib/api';
 
-/** Banner for envelope notices: stale = warning, unavailable/error = error. Never shown as zero (STATE §4). */
-export function EnvelopeBanner({ env, error }: { env?: ViewDataEnvelope<unknown>; error?: unknown }) {
-  if (error) {
-    const msg = error instanceof ApiFailure ? error.message : 'Terjadi kesalahan.';
-    const rid = error instanceof ApiFailure && error.requestId ? ` (Request ID ${error.requestId})` : '';
-    return <div className="banner e" role="alert"><b>Gagal memuat data.</b> {msg}{rid}</div>;
-  }
-  if (!env || !env.notices.length) return null;
-  const bad = env.state === 'unavailable' || env.state === 'error' || env.freshness === 'unavailable' || env.freshness === 'unknown';
+interface EnvelopeBannerProps {
+  env?: ViewDataEnvelope<unknown>;
+  error?: unknown;
+  onRetry?: () => void;
+  retrying?: boolean;
+}
+
+/** Describe freshness independently of the values rendered by each report. */
+export function EnvelopeBanner({ env, error, onRetry, retrying = false }: EnvelopeBannerProps) {
+  const failure = Boolean(error) || env?.state === 'error';
+  const unavailable = env?.state === 'unavailable' || env?.freshness === 'unavailable';
+  const uncertain = env?.freshness === 'unknown';
+  const stale = env?.state === 'stale' || env?.freshness === 'stale';
+  const bad = failure || unavailable || uncertain;
+  if (!bad && !stale && !env?.notices.length) return null;
+
+  const title = failure ? 'Gagal memuat data' : unavailable ? 'Sumber data tidak tersedia'
+    : uncertain ? 'Status data belum diketahui' : stale ? 'Data terlambat' : 'Informasi data';
+  const description = error ? (error instanceof ApiFailure ? error.message : 'Terjadi kesalahan.')
+    : env?.notices.map((n) => n.message).join(' ') || (stale ? 'Dashboard menampilkan rekaman terakhir.' : '');
+  const rid = error instanceof ApiFailure ? error.requestId : undefined;
+
   return (
-    <div className={`banner ${bad ? 'e' : 'w'}`} role={bad ? 'alert' : 'status'}>
-      {env.state === 'unavailable' && <b>Sumber data tidak tersedia. </b>}
-      {env.notices.map((n) => n.message).join(' ')}
-      {env.sourceUpdatedAt && <> · Update sumber terakhir: <span className="mono">{new Date(env.sourceUpdatedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}</span></>}
+    <div className={bad ? 'banner e source-banner' : 'banner w source-banner'} role={bad ? 'alert' : 'status'}>
+      <div>
+        <strong>{title}</strong>
+        {description && <div>{description}</div>}
+        {!error && env?.sourceUpdatedAt && <div>Update sumber terakhir · <time dateTime={env.sourceUpdatedAt} className="mono">{new Date(env.sourceUpdatedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}</time></div>}
+        {rid && <div>Request ID · <span className="mono">{rid}</span></div>}
+      </div>
+      {(failure || unavailable) && onRetry && (
+        <button className="btn" type="button" disabled={retrying} onClick={onRetry}>{retrying ? 'Memuat…' : 'Coba lagi'}</button>
+      )}
     </div>
   );
 }

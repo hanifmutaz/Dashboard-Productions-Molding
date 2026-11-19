@@ -1,11 +1,11 @@
-import { useState, type DragEvent } from 'react';
+import { useRef, useState, type DragEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PERMISSIONS, type MasterDataView, type Material, type Part, type StopCategory } from '@mpd/contracts';
 import { ApiFailure, api } from '../lib/api';
 import { useSession } from '../lib/session';
 import { fmtPrice, tokenColor } from '../lib/format';
-import { Kpi } from '../components/kpi';
-import { DataTable, downloadCsv } from '../components/table';
+import { Kpi, SkelDeck } from '../components/kpi';
+import { DataTable, Pager, downloadCsv } from '../components/table';
 import { Tabs, useToast } from '../components/ui';
 import { StopCategoryEditor } from './StopCategoryEditor';
 
@@ -45,16 +45,16 @@ export interface Row<T> { line: number; raw: string[]; value?: T; err?: string; 
 export interface MatRow { dpNo: string; part: Part | null; code: string; name: string; price: number }
 /** One CSV row of the material upload. DP Part may be empty: the row then only defines the material (code, name, price/g)
  *  and no part→material mapping is written. Identical repeats of the same material are merged. */
-export function parseMaterialRow(r: string[], acc: Row<MatRow>[], partBy: Map<string, Part>, matBy: Map<string, Material>): Row<MatRow> {
+export function parseMaterialRow(r: string[], acc: Row<MatRow>[] | ReadonlyMap<string, Row<MatRow>>, partBy: Map<string, Part>, matBy: Map<string, Material>): Row<MatRow> {
   const dp = (r[1] ?? '').trim(), code = (r[3] ?? '').trim(), name = (r[4] ?? '').trim(), price = parseNum(r[5] ?? '', 'dec');
   if (!code) return { line: 0, raw: r, err: 'DP Material is empty' };
   if (!name) return { line: 0, raw: r, err: 'Material Name is empty' };
   if (!(price > 0)) return { line: 0, raw: r, err: 'invalid Price material/g' };
-  const first = acc.find((a) => a.value?.code === code);
+  const first = Array.isArray(acc) ? acc.find((a) => a.value?.code === code) : acc.get(`material:${code}`);
   if (first && first.value!.price !== price) return { line: 0, raw: r, err: `${code} price conflicts with row ${first.line}` };
   if (first && first.value!.name !== name) return { line: 0, raw: r, err: `${code} name differs from row ${first.line}` };
-  const other = dp ? acc.find((a) => a.value?.dpNo.toLowerCase() === dp.toLowerCase() && a.value.code !== code) : undefined;
-  if (other) return { line: 0, raw: r, err: `DP Part ${dp} already uses ${other.value!.code} in row ${other.line}` };
+  const other = dp ? (Array.isArray(acc) ? acc.find((a) => a.value?.dpNo.toLowerCase() === dp.toLowerCase()) : acc.get(`part:${dp.toLowerCase()}`)) : undefined;
+  if (other && other.value!.code !== code) return { line: 0, raw: r, err: `DP Part ${dp} already uses ${other.value!.code} in row ${other.line}` };
   const part = dp ? partBy.get(dp.toLowerCase()) ?? null : null, cur = matBy.get(code);
   const changed = !cur || cur.pricePerGram !== price || cur.name !== name || (!!dp && part?.materialCode !== code);
   const warns: string[] = [];
@@ -64,33 +64,46 @@ export function parseMaterialRow(r: string[], acc: Row<MatRow>[], partBy: Map<st
   return { line: 0, raw: r, value: { dpNo: part?.dpNo ?? dp, part, code, name, price }, status: first ? 'unchanged' : changed ? (cur ? 'changed' : 'new') : 'unchanged', warn: warns.join(' · ') || undefined };
 }
 
-function Uploader<T>({ id, title, sub, expected, cols, parse, onApply, template, disabled }: {
+function Uploader<T>({ id, title, sub, expected, cols, parse, keys, onApply, template, disabled }: {
   id: string; title: string; sub: string; expected: string[]; cols: [string, (v: T) => string][];
-  parse: (r: string[], all: Row<T>[]) => Row<T>; onApply: (rows: T[]) => Promise<void>; template: () => void; disabled: boolean;
+  parse: (r: string[], seen: ReadonlyMap<string, Row<T>>) => Row<T>; keys: (value: T) => string[]; onApply: (rows: T[]) => Promise<void>; template: () => void; disabled: boolean;
 }) {
   const [rows, setRows] = useState<Row<T>[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState('');
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState(0);
+  const currentFile = useRef(0);
   const read = (file?: File) => {
-    setRows(null); setError(null);
+    if (disabled || busy) return;
+    const revision = ++currentFile.current;
+    setRows(null); setError(null); setPage(0);
     if (!file) return;
     if (!/\.csv$/i.test(file.name)) { setError('Choose a .csv file.'); return; }
     setFileName(file.name);
     file.text().then((text) => {
+      if (currentFile.current !== revision) return;
       const all = csvRows(text);
       if (!all.length) { setError('The file is empty.'); return; }
       const head = all[0]!.map((x) => x.replace(/^\uFEFF/, '').trim().toLowerCase());
       if (!expected.every((x, i) => head[i] === x.toLowerCase())) { setError(`CSV header doesn’t match this template. Expected: ${expected.join(' · ')} — Found: ${all[0]!.join(' · ')}`); return; }
       const data = all.slice(1);
       if (!data.length) { setError('The header is valid, but there are no data rows.'); return; }
-      const acc: Row<T>[] = [];
-      data.forEach((r, i) => acc.push(r.length < expected.length ? { line: i + 2, raw: r, err: `needs ${expected.length} columns` } : { ...parse(r, acc), line: i + 2, raw: r }));
-      setRows(acc);
-    }, () => setError('Could not read this file. Try saving it as CSV UTF-8.'));
+      const index = new Map<string, Row<T>>();
+      setRows(data.map((r, i) => {
+        const line = i + 2;
+        if (r.length < expected.length) return { line, raw: r, err: `needs ${expected.length} columns` };
+        const row = { ...parse(r, index), line, raw: r };
+        if (row.value && !row.err) {
+          for (const key of keys(row.value)) if (!index.has(key)) index.set(key, row);
+        }
+        return row;
+      }));
+    }, () => { if (currentFile.current === revision) setError('Could not read this file. Try saving it as CSV UTF-8.'); });
   };
-  const errors = rows?.filter((r) => r.err).length ?? 0, ok = rows?.filter((r) => !r.err && r.value) ?? [];
+  const errors = rows?.filter((r) => r.err) ?? [], ok = rows?.filter((r) => !r.err && r.value) ?? [];
+  const preview = [...errors, ...ok].slice(page * 50, (page + 1) * 50);
   return (
     <details className="card master-upload">
       <summary className="ch"><div><h3>{title}</h3><p>{sub}</p></div><span className="chip">Upload CSV <span className="upload-chevron">▾</span></span></summary>
@@ -107,25 +120,26 @@ function Uploader<T>({ id, title, sub, expected, cols, parse, onApply, template,
           {error && <div className="banner e">{error}</div>}
           {rows && (
             <>
-              <div className="note"><b>{rows.length} rows checked</b> · {rows.filter((r) => r.status === 'new').length} new · {rows.filter((r) => r.status === 'changed').length} changed · {rows.filter((r) => r.status === 'unchanged').length} unchanged · {rows.filter((r) => !r.err && r.warn).length} warnings · {errors} errors</div>
-              {errors ? <div className="banner e" style={{ marginTop: 'var(--s-size-8)' }}><b>Upload blocked.</b> Fix all errors in the CSV and upload it again; no rows will be applied.</div>
+              <div className="note"><b>{rows.length} rows checked</b> · {rows.filter((r) => r.status === 'new').length} new · {rows.filter((r) => r.status === 'changed').length} changed · {rows.filter((r) => r.status === 'unchanged').length} unchanged · {rows.filter((r) => !r.err && r.warn).length} warnings · {errors.length} errors</div>
+              {errors.length ? <div className="banner e" style={{ marginTop: 'var(--s-size-8)' }}><b>Upload blocked.</b> Fix all errors in the CSV and upload it again; no rows will be applied.</div>
                 : <div className="banner w" style={{ marginTop: 'var(--s-size-8)' }}><b>Review before applying.</b> Warnings don’t block upload. Changes are saved to the server and audited.</div>}
-              <div className="caps" style={{ marginTop: 'var(--s-size-10)' }}>Preview · {fileName} · all {rows.length} rows, errors first · scroll to see more</div>
+              <div className="caps" style={{ marginTop: 'var(--s-size-10)' }}>Preview · {fileName} · {rows.length} rows · errors first</div>
               <div className="pvw"><table>
                 <thead><tr><th>CSV row</th>{cols.map((c) => <th key={c[0]}>{c[0]}</th>)}<th>Status</th></tr></thead>
                 <tbody>
-                  {[...rows.filter((r) => r.err), ...rows.filter((r) => !r.err)].map((r) => (
+                  {preview.map((r) => (
                     <tr key={r.line} className={r.err ? 'bad' : r.warn ? 'wn' : ''}><td>{r.line}</td>{cols.map((c, i) => <td key={c[0]}>{r.value ? c[1](r.value) : (r.raw[i + 1] ?? '')}</td>)}
                       <td>{r.err ? `ERROR · ${r.err}` : `${(r.status ?? '').toUpperCase()}${r.warn ? ` · Warning: ${r.warn}` : ''}`}</td></tr>
                   ))}
                 </tbody>
               </table></div>
+              {rows.length > 50 && <Pager page={page} pages={Math.ceil(rows.length / 50)} go={setPage} />}
             </>
           )}
         </div>
         <div style={{ marginTop: 'var(--s-size-10)', display: 'flex', gap: 'var(--s-size-8)' }}>
-          <button className="btn pri" type="button" disabled={disabled || busy || !!errors || !ok.length}
-            onClick={() => { setBusy(true); onApply(ok.map((r) => r.value!)).then(() => setRows(null), () => undefined).finally(() => setBusy(false)); }}>{busy ? 'Applying…' : 'Apply upload'}</button>
+          <button className="btn pri" type="button" disabled={disabled || busy || !!errors.length || !ok.length}
+            onClick={() => { setBusy(true); onApply(ok.map((r) => r.value!)).then(() => setRows(null), () => undefined).finally(() => setBusy(false)); }}>{busy ? 'Applying…' : `Apply upload (${ok.length} valid rows)`}</button>
           <button className="btn" type="button" onClick={template}>Download template</button>
         </div>
       </div>
@@ -165,6 +179,10 @@ export function MasterDataPage() {
   const machinesOf = (dp: string) => machines.filter((m) => m.dpNo === dp).map((m) => m.machineNo);
   const changedParts = Object.entries(draft).filter(([dp, val]) => String(parts.find((p) => p.dpNo === dp)?.pricePerPcs ?? '') !== val);
 
+  if (!v) return <section className="view on"><div className="content">
+    {q.isPending ? <div className="deck u4"><SkelDeck n={4} /></div> :
+      <div className="banner e" role="alert">{q.error instanceof ApiFailure ? q.error.message : 'Gagal memuat Master Data.'} <button className="btn" type="button" onClick={() => void q.refetch()}>Coba lagi</button></div>}
+  </div></section>;
   return (
     <section className="view on">
       <div className="content">
@@ -185,13 +203,14 @@ export function MasterDataPage() {
                 const dp = r[1]!.trim(), price = parseNum(r[3]!, 'int'), name = r[2]!.trim();
                 if (!dp) return { line: 0, raw: r, err: 'DP Part is empty' };
                 if (!(price >= 0) || Math.abs(Math.round(price * 1e4) - price * 1e4) > 1e-6) return { line: 0, raw: r, err: 'invalid Harga/PCS' };
-                const dup = acc.find((a) => a.value?.dpNo.toLowerCase() === dp.toLowerCase());
+                const dup = acc.get(dp.toLowerCase());
                 if (dup) return { line: 0, raw: r, err: `Duplicate DP Part · also in row ${dup.line}` };
                 const p = partBy.get(dp.toLowerCase()) ?? null;
                 const old = p?.pricePerPcs ?? null;
                 return { line: 0, raw: r, value: { p, dpNo: p?.dpNo ?? dp, price, name }, status: !p ? 'new' : old === price ? 'unchanged' : 'changed',
                   warn: old && Math.abs(price - old) / old > 0.5 ? `changes ${Math.round(((price - old) / old) * 100)}% vs current Rp ${fmtPrice(old)} – check the separator` : p && name && name.toLowerCase() !== p.name.toLowerCase() ? `DP Name differs from master (${p.name})` : undefined };
               }}
+              keys={(row) => [row.dpNo.toLowerCase()]}
               onApply={(rows) => saveParts.mutateAsync(rows.map((x) => ({ dpNo: x.dpNo, pricePerPcs: x.price, version: x.p?.version ?? null, name: x.name }))).then(() => undefined)}
               template={() => downloadCsv('master_data_part.csv', [['No', 'DP Part', 'DP Name', 'Harga/PCS'], ...parts.map((p, i) => [i + 1, p.dpNo, p.name, p.pricePerPcs])])} />
             <div className="card">
@@ -230,6 +249,7 @@ export function MasterDataPage() {
             <Uploader<MatRow> id="imm-file" title="Upload CSV · Master data material" sub="Leave DP Part empty to upload the material list only · with DP Part it also maps that part to the material · the same DP Material must have the same price" disabled={!editable}
               expected={['No', 'DP Part', 'Part Name', 'DP Material', 'Material Name', 'Price material/g']} cols={[['DP Part', (x) => x.dpNo || '—'], ['DP Material', (x) => x.code], ['Material Name', (x) => x.name], ['Price/g', (x) => 'Rp ' + x.price]]}
               parse={(r, acc) => parseMaterialRow(r, acc, partBy, matBy)}
+              keys={(row) => [`material:${row.code}`, ...(row.dpNo ? [`part:${row.dpNo.toLowerCase()}`] : [])]}
               onApply={(rows) => {
                 const uniq = new Map<string, { code: string; name: string; pricePerGram: number; version: number | null }>();
                 rows.forEach((x) => uniq.set(x.code, { code: x.code, name: x.name, pricePerGram: x.price, version: matBy.get(x.code)?.version ?? null }));

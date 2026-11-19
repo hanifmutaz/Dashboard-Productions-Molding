@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { PERMISSIONS, type LossGroup, type StopCategoryRef, type StopTimeView } from '@mpd/contracts';
-import { useFilters } from '../lib/filters';
 import { useSession } from '../lib/session';
 import { delta } from '../lib/status';
 import { f1, fmt, tokenColor } from '../lib/format';
@@ -10,14 +9,14 @@ import { EmptyDeck, Kpi, SkelDeck } from '../components/kpi';
 import { DataTable, Pager, downloadCsv } from '../components/table';
 import { Menu, MenuItem, Tabs, Toggle, useTipProps, useToast } from '../components/ui';
 import { EnvelopeBanner, emptyMsg } from '../components/state';
-import { useMonitoring } from './Production';
+import { shiftLabel } from '../lib/period';
+import { useMonitoring } from '../lib/monitoring';
 
 type Grouped = StopTimeView['byMachine'][number] | StopTimeView['byProduct'][number];
-const SHIFT_LBL = { '1': 'Shift 1 · 06–14', '2': 'Shift 2 · 14–22', '3': 'Shift 3 · 22–06' } as const;
+
 
 export function StopTimePage() {
   const { settings: s, can } = useSession();
-  const { f } = useFilters();
   const [sp] = useSearchParams();
   const nav = useNavigate();
   const toast = useToast();
@@ -55,7 +54,8 @@ export function StopTimePage() {
   };
 
   const exportEvents = () => {
-    downloadCsv(`molding_stop_details_${f.from}_${f.to}.csv`, [['Rank', 'Detail', 'Category', 'Group', 'Events', 'Minutes', 'Share %', 'Machines'],
+    if (!v || q.isError) return;
+    downloadCsv(`molding_stop_details_${v.range.from}_${v.range.to}.csv`, [['Rank', 'Detail', 'Category', 'Group', 'Events', 'Minutes', 'Share %', 'Machines'],
       ...(v?.details ?? []).map((d, i) => [i + 1, d.detail, catOf(d.categoryId).short, G.get(catOf(d.categoryId).group)?.name ?? '', d.events, d.minutes, f1((d.minutes / (t?.minutes || 1)) * 100), d.machines.join(' ')])]);
     toast('Exported top details');
   };
@@ -68,7 +68,7 @@ export function StopTimePage() {
   return (
     <section className="view on">
       <div className="content">
-        <EnvelopeBanner env={env} error={q.error} />
+        <EnvelopeBanner env={env} error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
         <div className="deck">
           {q.isPending ? <SkelDeck n={5} /> : !t ? <EmptyDeck labels={['Total stop time', 'Stop events', 'Active categories', 'Active details', 'Info-only stops']} msg={msg} /> : (
             <>
@@ -124,7 +124,7 @@ export function StopTimePage() {
             <div className="ch"><div><h3>Top details across all categories</h3><p>{v?.details.length ?? 0} active details · key = category + detail</p></div>
               <div style={{ display: 'flex', gap: 'var(--s-size-8)' }}>
                 <input className="srch" placeholder="Search detail or category…" style={{ width: 'var(--s-size-240)', margin: 0 }} value={tdQ} onChange={(e) => setTdQ(e.target.value)} aria-label="Search detail" />
-                {can(PERMISSIONS.exportStopTime) && <Menu label="Export ▾"><MenuItem onSelect={exportEvents}>Top details (CSV)</MenuItem></Menu>}
+                {can(PERMISSIONS.exportStopTime) && <Menu label="Export ▾" disabled={!v || q.isError}><MenuItem onSelect={exportEvents}>Top details (CSV)</MenuItem></Menu>}
               </div>
             </div>
             <div className="cb" style={{ padding: 'var(--s-size-12) 0 0' }}>
@@ -163,7 +163,7 @@ export function StopTimePage() {
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-size-14)' }}>
-              <div className="card"><div className="ch"><h3>Stop time by shift</h3></div><div className="cb"><div className="bl"><BarList text kw="var(--s-size-120)" vw="var(--s-size-90)" items={(v?.byShift ?? []).map((x) => ({ k: SHIFT_LBL[x.shift], v: x.minutes, c: 'var(--primary)', l: fmt(x.minutes) + ' min' }))} /></div></div></div>
+              <div className="card"><div className="ch"><h3>Stop time by shift</h3></div><div className="cb"><div className="bl"><BarList text kw="var(--s-size-120)" vw="var(--s-size-90)" items={(v?.byShift ?? []).map((x) => ({ k: shiftLabel(s.shifts, Number(x.shift)), v: x.minutes, c: 'var(--primary)', l: fmt(x.minutes) + ' min' }))} /></div></div></div>
               <div className="card"><div className="ch"><h3>Lowest stop time</h3></div><div className="cb"><RankList col="var(--good)" rows={[...(v?.byMachine ?? [])].sort((a, b) => a.minutes - b.minutes).slice(0, 5).map((m) => ({ key: m.machineNo, title: `MC ${m.machineNo}`, sub: m.productName ?? '', value: fmt(m.minutes) + ' min' }))} /></div></div>
             </div>
           </div></div>
