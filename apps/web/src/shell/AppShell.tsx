@@ -3,7 +3,8 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { PERMISSIONS, type Permission } from '@mpd/contracts';
 import { useSession } from '../lib/session';
 import { useFilters } from '../lib/filters';
-import { PRESETS, rangeTxt, shiftLabel } from '../lib/period';
+import { PeriodFilter } from './PeriodFilter';
+import { shiftLabel } from '../lib/period';
 import { timeAgo } from '../lib/format';
 import { useTip, useToast } from '../components/ui';
 import { OrganizationName } from '../components/OrganizationName';
@@ -193,29 +194,16 @@ function SourceIndicator() {
 }
 
 function Band({ page }: { page: PageMeta }) {
-  const { f, setF, applyPreset, reset, today } = useFilters();
+  const { f, setF, reset } = useFilters();
   const { settings } = useSession();
   const finance = page.key === 'sales' || page.key === 'scrap';
-  const [pop, setPop] = useState(false);
-  const [from, setFrom] = useState(f.from);
-  const [to, setTo] = useState(f.to);
   const [q, setQ] = useState(f.q);
-  const popRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { setFrom(f.from); setTo(f.to); }, [f.from, f.to]);
   useEffect(() => setQ(f.q), [f.q]);
   useEffect(() => {
     if (finance) return;
     const t = setTimeout(() => q !== f.q && setF({ q }), 200);
     return () => clearTimeout(t);
   }, [finance, q, f.q, setF]);
-  useEffect(() => {
-    if (!pop) return;
-    const close = (e: MouseEvent) => { if (!popRef.current?.contains(e.target as Node)) setPop(false); };
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setPop(false);
-    document.addEventListener('mousedown', close);
-    document.addEventListener('keydown', esc);
-    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc); };
-  }, [pop]);
   const shiftLbl = (s: number) => shiftLabel(settings.shifts, s);
   return (
     <section className="band">
@@ -226,28 +214,7 @@ function Band({ page }: { page: PageMeta }) {
       </div>
       {page.filtered && (
         <div className="filters">
-          <div className="f" style={{ position: 'relative' }} ref={popRef}>
-            <span className="fl">Period</span>
-            <button className="fin pbtn" type="button" aria-haspopup="dialog" aria-expanded={pop} onClick={() => setPop((p) => !p)}>
-              <span><b>{f.preset === 'custom' ? 'Custom range' : PRESETS[f.preset]}</b> <span className="mono mu">{rangeTxt(f.from, f.to)}</span></span><span aria-hidden="true">▾</span>
-            </button>
-            <div className={`pop${pop ? ' open' : ''}`} role="dialog" aria-label="Period">
-              <div>
-                {(Object.keys(PRESETS) as (keyof typeof PRESETS)[]).map((k) => (
-                  <button key={k} type="button" className={`po${f.preset === k ? ' on' : ''}`} onClick={() => { applyPreset(k); setPop(false); }}>{PRESETS[k]}</button>
-                ))}
-              </div>
-              <div className="pc">
-                <label>From<input type="date" value={from} max={today} onChange={(e) => setFrom(e.target.value)} /></label>
-                <label>To<input type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} /></label>
-                <button className="btn pri" type="button" disabled={!from || !to || from > today || to > today} onClick={() => {
-                  const [a, b] = from <= to ? [from, to] : [to, from];
-                  setF({ from: a, to: b > today ? today : b, preset: 'custom' });
-                  setPop(false);
-                }}>Apply custom range</button>
-              </div>
-            </div>
-          </div>
+          <PeriodFilter key={page.key} />
           <div className="f"><label htmlFor="fShift">Shift</label>
             <select className="fin" id="fShift" value={f.shift} onChange={(e) => setF({ shift: e.target.value as typeof f.shift })}>
               <option value="">All shifts</option>{[1, 2, 3].map((s) => <option key={s} value={String(s)}>{shiftLbl(s)}</option>)}

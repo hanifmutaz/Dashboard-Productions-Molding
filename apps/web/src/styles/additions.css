@@ -70,7 +70,6 @@ button.pct.lk{border:0;font:inherit}
   .ch,.phead,.ssave,.ssave>span{flex-wrap:wrap}
   .ch input{max-width:100%}
   .foot{flex-wrap:wrap;gap:var(--s-size-8)}
-  .pop{max-width:calc(100vw - 48px)}
   .deck:not(.u4)>.kpi{min-width:0}
 }
 @media(pointer:coarse){

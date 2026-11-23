@@ -130,15 +130,6 @@ input.fin{min-width:var(--s-size-200)}
 .pbtn b{color:var(--primary);font-weight:var(--c-font-weight-600)}
 .reset{height:var(--s-size-32);border:var(--s-size-1) solid var(--s-rgba-rgba-255-255-255-45);background:transparent;color:var(--s-on-brand);border-radius:var(--r-sm);padding:0 var(--s-size-14);font-weight:var(--c-font-weight-600);transition:background .15s}
 @media (hover:hover){.reset:hover{background:var(--s-rgba-rgba-255-255-255-14)}}
-.pop{position:absolute;z-index:60;top:calc(100% + var(--s-size-4));left:0;background:var(--surface);color:var(--ink);border:var(--s-size-1) solid var(--line-2);border-radius:var(--r);box-shadow:var(--sh-pop);padding:var(--s-size-6);display:none;width:var(--s-size-310)}
-.pop.open{display:block;animation:drop .14s var(--ease)}
-.pop .po{display:block;width:100%;text-align:left;border:none;background:none;padding:var(--s-size-8) var(--s-size-10);border-radius:var(--r-sm);transition:background .12s}
-@media (hover:hover){.pop .po:hover{background:var(--surface-3)}}
-.pop .po.on{background:var(--primary-soft);color:var(--primary);font-weight:var(--c-font-weight-600)}
-.pop .pc{display:grid;grid-template-columns:1fr 1fr;gap:var(--s-size-8);border-top:var(--s-size-1) solid var(--line);margin-top:var(--s-size-6);padding:var(--s-size-10) var(--s-size-4) var(--s-size-4)}
-.pop .pc label{font-size:var(--s-size-12);color:var(--muted)}
-.pop .pc input{width:100%;height:var(--s-size-32);border:var(--s-size-1) solid var(--line-2);border-radius:var(--r-sm);padding:0 var(--s-size-6);background:var(--surface)}
-.pop .pc .btn{grid-column:1/-1}
 .content{padding:var(--s-size-16) var(--s-size-20) var(--s-size-32);display:flex;flex-direction:column;gap:var(--s-size-14);max-width:var(--s-size-1680);width:100%;margin:var(--c-margin-0-auto)}
 .card{background:var(--surface);border:var(--s-size-1) solid var(--line);border-radius:var(--r);box-shadow:var(--sh-1);transition:background .25s,border-color .25s}
 .ch{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--s-size-10);padding:var(--s-size-14) var(--s-size-16) 0;flex-wrap:wrap}
@@ -503,7 +494,6 @@ tbody tr td{border-bottom-color:var(--line)}
 .kpi .kd{padding-top:var(--s-size-10)}
 @media(max-width:900px){.bh .bmeta{display:none}}
 .band{overflow:visible!important}
-.pop{z-index:65}
 body.kiosk #kioskBtn{display:none!important}
 .mdtools{display:flex;gap:var(--s-size-10);align-items:center;flex-wrap:wrap}
 .mdday{display:flex;gap:var(--s-size-6);align-items:center}
@@ -550,8 +540,8 @@ body.dark .ni.on{background:var(--s-paint-2a2d30);color:var(--ink)}
 @media (hover:hover){.ubox:hover{background:var(--surface-2)}}
 @media (hover:hover){.tbtn:hover{background:var(--surface-2);color:var(--ink)}}
 @media (hover:hover){.btn:not(.pri):hover{border-color:var(--line-2);color:var(--ink);background:var(--surface-2)}}
-@media (hover:hover){.ml button:hover,.ml label:hover,.pop .po:hover{background:var(--surface-2)}}
-.pop .po.on,.seg button.on{background:var(--surface-2);color:var(--ink);box-shadow:none}
+@media (hover:hover){.ml button:hover,.ml label:hover{background:var(--surface-2)}}
+.seg button.on{background:var(--surface-2);color:var(--ink);box-shadow:none}
 .tabsrow .tab.on{border-bottom-color:var(--line-2);color:var(--ink)}
 .snav a.on{color:var(--ink);border-left-color:var(--line-2);background:var(--surface-2)}
 @media(max-width:1100px){.snav a.on{border-bottom-color:var(--line-2)}}
@@ -559,7 +549,7 @@ body.dark .ni.on{background:var(--s-paint-2a2d30);color:var(--ink)}
 .br.sel .bk,.rw.sel .nm{color:var(--ink);font-weight:var(--c-font-weight-600)}
 .mc{color:var(--ink-2)}
 @media (hover:hover){.kpi.click:hover,.mdc:hover{transform:none;box-shadow:none}}
-.view.on>.content>*,.deck>.kpi,.pane.on,.br .bt i,.gauge i,.mini .mt i,.rw .bar i,.gbar i,svg.ch2 rect.b,svg.ch2 path.ln,svg.ch2 circle,.flash,.tip.show,.ml.open,.pop.open,.toast.show,.mbg.open .modal{animation:none!important}
+.view.on>.content>*,.deck>.kpi,.pane.on,.br .bt i,.gauge i,.mini .mt i,.rw .bar i,.gbar i,svg.ch2 rect.b,svg.ch2 path.ln,svg.ch2 circle,.flash,.tip.show,.ml.open,.toast.show,.mbg.open .modal{animation:none!important}
 html,body{touch-action:manipulation}
 @media (hover:none){.rtip{display:none!important}}
 .dv.neu,.kpi .kd .dv.neu{color:var(--muted)}
