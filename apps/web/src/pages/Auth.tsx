@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { OrganizationName } from '../components/OrganizationName';
 import { ApiFailure, api } from '../lib/api';
 import { APP_VERSION } from '../shell/AppShell';
 import facility from '../assets/login-hrs-facility.webp';
@@ -11,7 +12,11 @@ function Frame({ children }: { children: ReactNode }) {
   return (
     <div className="authwrap">
       <div className="card authcard">
-        <div className="brand authbrand"><img className="hlogo" src="/hrs-logo.png" alt="HRS · Hirose Electric" /><span className="bsep" /><div className="bt"><b>Molding</b><small>PM Dashboard</small></div></div>
+        <div className="brand authbrand">
+          <img className="hlogo" src="/hrs-logo.png" alt="HRS · Hirose Electric" />
+          <span className="bsep" />
+          <OrganizationName className="bt" />
+        </div>
         {children}
       </div>
       <div className="sbver">Molding Dashboard · v{APP_VERSION}</div>
@@ -37,7 +42,7 @@ export function LoginPage() {
         <img className="login-photo" src={facility} alt="" width={1024} height={1536} fetchPriority="high" />
         <div className="login-brand">
           <img src="/hrs-logo.png" width={147} height={80} alt="HRS" />
-          <span>Department Productions</span>
+          <OrganizationName className="login-organization" />
         </div>
         <p className="login-name">Dashboard<br />Productions</p>
       </div>

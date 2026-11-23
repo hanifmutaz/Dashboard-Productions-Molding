@@ -6,6 +6,7 @@ import { useFilters } from '../lib/filters';
 import { PRESETS, rangeTxt, shiftLabel } from '../lib/period';
 import { timeAgo } from '../lib/format';
 import { useTip, useToast } from '../components/ui';
+import { OrganizationName } from '../components/OrganizationName';
 
 export const APP_VERSION = '1.0.0';
 
@@ -113,7 +114,7 @@ export function AppShell() {
         <div className="brand">
           <img className="hlogo" src="/hrs-logo.png" alt="HRS · Hirose Electric" />
           <span className="bsep" />
-          <div className="bt"><b>Molding</b><small>PM Dashboard</small></div>
+          <OrganizationName className="bt" />
           <button className="sbt" type="button" title={rail ? 'Expand sidebar' : 'Collapse sidebar'} aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!rail}
             onClick={() => void savePrefs({ side: rail ? 'full' : 'rail' }).catch(() => toast('Gagal menyimpan preferensi'))}>
             <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path className="bar2" d="M9 4v16" /></svg>

@@ -8,6 +8,7 @@ import { shiftStarts } from '../../lib/period';
 import { cls, type TargetKey } from '../../lib/status';
 import { hh, timeAgo, tokenColor } from '../../lib/format';
 import { useWidth } from '../../components/charts';
+import { OrganizationName } from '../../components/OrganizationName';
 import mdCss from './machine-detail.css?inline';
 
 /* Keep Machine Detail styles inside the Shadow DOM in dashboard and kiosk modes. */
@@ -149,7 +150,7 @@ export function MachineDashboard(p: Props) {
           <div className="topin frame">
             <div className="brand">
               <span className="logo"><img src="/hrs-logo.png" alt="HRS" /></span>
-              <div className="product-title">Molding Dashboard<strong>Machine Detail</strong></div>
+              <OrganizationName className="product-title" />
             </div>
             <div className="top-tools">
               {p.onBack && !p.ipad && !p.locked && (

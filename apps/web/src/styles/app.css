@@ -58,6 +58,8 @@ body.dark .hlogo{filter:brightness(0) invert(1)}
 .bt{min-width:0;flex:1}
 .bt b{font-size:var(--s-size-13p5);display:block;line-height:var(--c-line-height-1-1);white-space:nowrap}
 .bt small{font-size:var(--s-size-12);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:var(--c-font-weight-600);white-space:nowrap}
+.sidebar .brand{gap:var(--s-size-6);padding-inline:var(--s-size-8)}
+.sidebar .brand .bt b{font-size:var(--s-size-12p5)}
 .sbt{width:var(--s-size-32);height:var(--s-size-32);flex:none;border:none;background:none;color:var(--muted);border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;transition:background .15s,color .15s}
 @media (hover:hover){.sbt:hover{background:var(--surface-3);color:var(--ink)}}
 .sbt svg{width:var(--s-size-18);height:var(--s-size-18);fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}

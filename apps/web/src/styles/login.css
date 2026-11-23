@@ -84,9 +84,21 @@
   filter: brightness(0) invert(1);
 }
 
-.login-brand span {
+.login-organization {
   border-inline-start: 1px solid rgb(255 255 255 / 46%);
   padding-inline-start: 14px;
+  line-height: 1.2;
+}
+
+.login-organization b,
+.login-organization small {
+  display: block;
+}
+
+.login-organization small {
+  margin-block-start: 3px;
+  color: #dce8f7;
+  font-weight: 600;
 }
 
 .login-name {
@@ -248,7 +260,7 @@
 
   .login-brand { gap: 10px; }
   .login-brand img { width: 44px; }
-  .login-brand span { padding-inline-start: 10px; }
+  .login-organization { padding-inline-start: 10px; }
   .login-name { font-size: clamp(30px, 7.5vw, 46px); }
 
   .login-panel {
