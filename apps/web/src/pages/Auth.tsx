@@ -42,9 +42,11 @@ export function LoginPage() {
         <img className="login-photo" src={facility} alt="" width={1024} height={1536} fetchPriority="high" />
         <div className="login-brand">
           <img src="/hrs-logo.png" width={147} height={80} alt="HRS" />
-          <OrganizationName className="login-organization" />
+          <div className="login-identity">
+            <p className="login-product">Dashboard Productions</p>
+            <OrganizationName className="login-organization" />
+          </div>
         </div>
-        <p className="login-name">Dashboard<br />Productions</p>
       </div>
       <section className="login-panel" aria-labelledby="login-title">
         <div className="login-content">

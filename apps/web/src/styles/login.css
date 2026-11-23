@@ -40,9 +40,7 @@
   isolation: isolate;
   position: relative;
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 32px;
+  align-items: flex-start;
   min-width: 0;
   padding: clamp(24px, 4.5vw, 84px);
   color: #fff;
@@ -79,15 +77,23 @@
 
 .login-brand img {
   display: block;
+  flex: none;
   width: clamp(52px, 5vw, 84px);
   height: auto;
   filter: brightness(0) invert(1);
 }
 
-.login-organization {
+.login-identity {
   border-inline-start: 1px solid rgb(255 255 255 / 46%);
   padding-inline-start: 14px;
   line-height: 1.2;
+}
+
+.login-product {
+  margin: 0 0 4px;
+  font-size: clamp(16px, 1.55vw, 28px);
+  font-weight: 800;
+  letter-spacing: -.02em;
 }
 
 .login-organization b,
@@ -99,13 +105,6 @@
   margin-block-start: 3px;
   color: #dce8f7;
   font-weight: 600;
-}
-
-.login-name {
-  font-size: clamp(40px, 6.05vw, 118px);
-  font-weight: 800;
-  line-height: .99;
-  letter-spacing: -.05em;
 }
 
 .login-panel {
@@ -247,7 +246,7 @@
   }
 
   .login-hero {
-    gap: 16px;
+    align-items: center;
     min-height: 174px;
     padding: max(16px, env(safe-area-inset-top)) 20px 16px;
   }
@@ -260,8 +259,7 @@
 
   .login-brand { gap: 10px; }
   .login-brand img { width: 44px; }
-  .login-organization { padding-inline-start: 10px; }
-  .login-name { font-size: clamp(30px, 7.5vw, 46px); }
+  .login-identity { padding-inline-start: 10px; }
 
   .login-panel {
     align-items: start;
