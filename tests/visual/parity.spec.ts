@@ -10,6 +10,18 @@ const me = { kind: 'user', csrfToken: 't', user: { id: 'u1', username: 'viewer',
 const env = (data: unknown, state = 'current') => ({ state, data, freshness: 'not-applicable', sourceUpdatedAt: '2026-11-07T08:00:00+07:00', generatedAt: '2026-11-07T08:05:00+07:00', notices: [] });
 const metric = (v: number | null) => (v === null ? { value: null, reason: 'Rumus belum disetujui (Q-003)' } : { value: v, reason: null });
 
+/** Shift & status capaian ada di popover periode: buka dulu, pilih, lalu Terapkan. */
+async function openFilters(page: Page) {
+  await page.locator('.period-filter .pbtn').click();
+  await expect(page.getByRole('dialog', { name: 'Filter periode' })).toBeVisible();
+}
+async function applyFilters(page: Page, values: { shift?: string; status?: string }) {
+  await openFilters(page);
+  if (values.shift !== undefined) await page.locator('#fShift').selectOption(values.shift);
+  if (values.status !== undefined) await page.locator('#fStatus').selectOption(values.status);
+  await page.getByRole('button', { name: 'Terapkan' }).click();
+}
+
 async function stub(page: Page, shiftGate?: Promise<void>) {
   await page.clock.setFixedTime(new Date('2026-11-07T10:00:00+07:00'));
   await page.route('**/api/auth/me', (r) => r.fulfill({ json: me }));
@@ -78,7 +90,7 @@ test('UI behavior · selection hides previous results and disables exports', asy
   await page.getByRole('tab', { name: 'Daily trend' }).focus();
   await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('tab', { name: 'By machine' })).toBeFocused();
-  await page.locator('#fShift').selectOption('2');
+  await applyFilters(page, { shift: '2' });
   try {
     await expect(page.getByRole('button', { name: /Export/ })).toBeDisabled();
     await expect(page.getByText('49,000', { exact: true })).toHaveCount(0);
@@ -91,7 +103,7 @@ test('UI behavior · drill-down preserves machine scope', async ({ page }) => {
   await stub(page);
   await page.route('**/api/v1/monitoring/daily-rates**', (r) => r.fulfill({ json: env(null, 'empty') }));
   await page.goto('/production');
-  await page.locator('#fStatus').selectOption('attention');
+  await applyFilters(page, { status: 'attention' });
   const scoped = page.waitForResponse((response) => response.url().includes('/monitoring/production') && new URL(response.url()).searchParams.get('q') === 'DP-1001');
   await page.locator('#fSearch').fill('DP-1001');
   await scoped;
@@ -119,6 +131,7 @@ test('UI behavior · navigation stays in the phone viewport', async ({ page }) =
 test('UI behavior · Sales exposes period and shift', async ({ page }) => {
   await stub(page);
   await page.goto('/sales');
+  await openFilters(page);
   await expect(page.locator('#fShift')).toBeVisible();
   await expect(page.locator('#fStatus')).toHaveCount(0);
   await expect(page.getByText('Periode ini dinilai dengan harga part yang berlaku saat laporan dimuat.')).toBeVisible();

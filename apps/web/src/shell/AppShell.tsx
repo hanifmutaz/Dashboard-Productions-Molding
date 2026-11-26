@@ -214,20 +214,11 @@ function Band({ page }: { page: PageMeta }) {
       </div>
       {page.filtered && (
         <div className="filters">
-          <PeriodFilter key={page.key} />
-          <div className="f"><label htmlFor="fShift">Shift</label>
-            <select className="fin" id="fShift" value={f.shift} onChange={(e) => setF({ shift: e.target.value as typeof f.shift })}>
-              <option value="">All shifts</option>{[1, 2, 3].map((s) => <option key={s} value={String(s)}>{shiftLbl(s)}</option>)}
-            </select>
-          </div>
-          {!finance && <><div className="f"><label htmlFor="fStatus">Status capaian</label>
-            <select className="fin" id="fStatus" value={f.status} onChange={(e) => setF({ status: e.target.value as typeof f.status })}>
-              <option value="">All machines</option><option value="attention">Perlu perhatian</option><option value="within">Dalam batas capaian</option><option value="unknown">Capaian belum tersedia</option>
-            </select>
-          </div>
-          <div className="f"><label htmlFor="fSearch">Machine / part</label><input className="fin" id="fSearch" placeholder="Search MC No or part…" value={q} onChange={(e) => setQ(e.target.value)} /></div></>}
-          <div className="f"><span className="fl">&nbsp;</span><button className="reset" type="button" onClick={reset}>Reset</button></div>
-          {finance && <div className="f"><span className="fl">&nbsp;</span><Link className="btn" to={{ pathname: page.path, search: new URLSearchParams({ from: f.from, to: f.to, ...(f.shift ? { shift: f.shift } : {}) }).toString() }}>Buka link periode ini</Link></div>}
+          <PeriodFilter key={page.key} showStatus={!finance}
+            shifts={[1, 2, 3].map((n) => ({ value: String(n) as typeof f.shift, label: shiftLbl(n) }))} />
+          {!finance && <div className="f fsearch"><input className="fin" id="fSearch" type="search" aria-label="Machine / part" placeholder="Search MC No or part…" value={q} onChange={(e) => setQ(e.target.value)} /></div>}
+          <button className="reset" type="button" onClick={reset}>Reset</button>
+          {finance && <Link className="btn" to={{ pathname: page.path, search: new URLSearchParams({ from: f.from, to: f.to, ...(f.shift ? { shift: f.shift } : {}) }).toString() }}>Buka link periode ini</Link>}
         </div>
       )}
     </section>

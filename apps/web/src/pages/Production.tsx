@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { PERMISSIONS, type MachineProduction, type ProductionView } from '@mpd/contracts';
 import { useMonitoring } from '../lib/monitoring';
 import { useSession } from '../lib/session';
@@ -24,7 +24,6 @@ export function ProductionPage() {
   const toast = useToast();
   const q = useMonitoring<ProductionView>('production');
   const [tab, setTab] = useState<'prod-0' | 'prod-1' | 'prod-2'>('prod-0');
-  const [more, setMore] = useState(false);
   const [rate, setRate] = useState<RateTarget | null>(null);
   const env = q.data, v = env?.data ?? null;
   const t = v?.totals, p = v?.previous;
@@ -52,7 +51,6 @@ export function ProductionPage() {
   const msg = emptyMsg(env);
   const noRecord = v ? v.daily.flatMap((d, i) => d.hasRecord === false ? [i] : []) : [];
   const tipD = (i: number) => { const d = v!.daily[i]!.date; return `${DOW[pd(d).getUTCDay()]} ${lblY(d)}`; };
-  const worst = v ? [...v.machines].filter((m) => m.bekidoritsu.value !== null).sort((a, b) => a.bekidoritsu.value! - b.bekidoritsu.value!)[0] : undefined;
   const exportCsv = () => {
     if (!v || q.isError) return;
     downloadCsv(`molding_production_${v.range.from}_${v.range.to}.csv`, [
@@ -75,23 +73,6 @@ export function ProductionPage() {
               <Kpi l="Deviation" v={t.planReported === false || t.actualReported === false ? '—' : (t.deviation < 0 ? '−' : '+') + fmt(Math.abs(t.deviation))} u="pcs" vc={t.deviation < 0 ? 'var(--bad)' : 'var(--good)'} desc="Production actual − plan" d={<>{delta(t.deviation, p?.deviation, 'up')} {vs}</>} />
             </>
           )}
-        </div>
-        <div className="card">
-          <div className="strip-note">
-            <span>{worst ? <><span className="dot" style={{ background: worst.deviation < 0 ? 'var(--bad)' : 'var(--good)' }} />Lowest achievement: <b>MC {worst.machineNo}</b> at <b>{f1(worst.bekidoritsu.value)}%</b>, {worst.deviation === 0 ? 'on plan' : `${fmt(Math.abs(worst.deviation))} pcs ${worst.deviation < 0 ? 'below' : 'above'} plan`}.</> : msg}</span>
-            <span style={{ display: 'flex', gap: 'var(--s-size-14)', alignItems: 'center' }}>
-              <span className="fa" style={{ fontSize: 'var(--s-size-12)' }}>Targets in Settings</span>
-              <button className="lnk" type="button" aria-expanded={more} onClick={() => setMore((x) => !x)}>{more ? 'Show fewer metrics' : 'Show more metrics'}</button>
-            </span>
-          </div>
-          <div className={`more${more ? ' open' : ''}`}>
-            {([
-              ['Production gross', fmt(t?.gross), 'pcs', delta(t?.gross, p?.gross, 'up')],
-              ['Reject', fmt(t?.reject), `pcs · ${fmt(t?.ipr.value)} ppm`, delta(t?.reject, p?.reject, 'down')],
-            ] as [string, string, string, ReactNode][]).map((x) => (
-              <div key={x[0]}><div className="caps">{x[0]}</div><div className="v">{x[1]}<small>{x[2]}</small></div><div className="d">{x[3]}</div></div>
-            ))}
-          </div>
         </div>
         <Tabs value={tab} onChange={setTab} items={[{ id: 'prod-0', label: 'Daily trend' }, { id: 'prod-1', label: 'By machine' }, { id: 'prod-2', label: 'Ranking' }]} />
         {tab === 'prod-0' && (

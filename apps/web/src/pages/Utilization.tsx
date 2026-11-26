@@ -84,10 +84,6 @@ export function UtilizationPage() {
             </>
           )}
         </div>
-        <div className="card"><div className="strip-note">
-          <span>{v ? <><span className="dot" style={{ background: 'var(--primary)' }} />{ms.length} machines in range · OEE, Availability &amp; Performance dari ConMas</> : msg}</span>
-          <span className="mono mu" style={{ fontSize: 'var(--s-size-12)' }}><b>Kikai</b> = (Planned − Stop) ÷ Planned · <b>Sogo</b> = (Planned − Stop) ÷ Calendar · <b>Shugyo</b> = Planned ÷ Calendar</span>
-        </div></div>
         <Tabs value={tab} onChange={setTab} items={[{ id: 'util-0', label: 'OEE breakdown' }, { id: 'util-1', label: 'Ranking' }, { id: 'util-2', label: 'Machine table' }]}
           right={<div className="legend"><span><i style={{ background: 'var(--bad)' }} />More than {s.band} pt below target</span><span><i style={{ background: 'var(--warn)' }} />Below target</span><span><i style={{ background: 'var(--good)' }} />At / above target</span></div>} />
         {tab === 'util-0' && (
@@ -150,6 +146,10 @@ export function UtilizationPage() {
             </div>
           </div></div>
         )}
+        <div className="card"><div className="strip-note">
+          <span>{v ? <><span className="dot" style={{ background: 'var(--primary)' }} />{ms.length} machines in range · OEE, Availability &amp; Performance dari ConMas</> : msg}</span>
+          <span className="mono mu" style={{ fontSize: 'var(--s-size-12)' }}><b>Kikai</b> = (Planned − Stop) ÷ Planned · <b>Sogo</b> = (Planned − Stop) ÷ Calendar · <b>Shugyo</b> = Planned ÷ Calendar</span>
+        </div></div>
       </div>
       {rate && <RateModal target={rate} onClose={() => setRate(null)} />}
     </section>

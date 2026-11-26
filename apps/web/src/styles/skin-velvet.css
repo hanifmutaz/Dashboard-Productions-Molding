@@ -2,9 +2,8 @@
  * Pelengkap packages/ui-tokens/skin-velvet.css. Selector sengaja diawali `.app` agar menang atas app.css
  * tanpa !important dan tanpa mengedit file hasil ekstrak. Hanya tampilan; markup tidak berubah.
  * Referensi: docs/06-testing/deviation-log.md (DEV-023). */
-body{letter-spacing:-.005em}
+body{letter-spacing:.005em}
 .app .bh h1{font-weight:750;letter-spacing:-.015em}
-.app .kpi .kv b{font-weight:800;letter-spacing:-.03em}
 
 /* Sidebar: panel navy mengambang (velvet) */
 .app .sidebar{
@@ -50,3 +49,80 @@ body.rail .app .sidebar .ngrp{background:rgba(255,255,255,.18)}
 /* Hero band halaman */
 .app .band{background:linear-gradient(135deg,#104483 0%,#09264d 100%)}
 body.dark .app .band{background:linear-gradient(135deg,#0f2a4f 0%,#07182f 100%)}
+
+/* ── Pass 2 (DEV-024): referensi "Industrial Velvet · DM Sans Fix" ─────────────────────────────
+ * Tipografi angka, kartu, tabel, rail sidebar. Halaman Machine Detail (body.md-on) dikecualikan: DEV-022.
+ * Palet status (good/warn/bad light+dark) sudah identik dengan referensi, jadi tidak diubah. */
+:root{--font-data:"DM Sans Variable","DM Sans","Segoe UI",system-ui,sans-serif}
+
+/* Angka: DM Sans, lebar tabular + lining, tracking sedikit longgar agar digit tidak menempel */
+body:not(.md-on) .app :is(.kpi .kv b,.kpi .kd,td,.mono,.br .bv,.rw .v,.pct,output){
+  font-family:var(--font-data);font-variant-numeric:tabular-nums lining-nums;letter-spacing:.01em;
+}
+body:not(.md-on) .app .kpi .kv b{font-weight:750;letter-spacing:.015em}
+body:not(.md-on) .app .kpi .kv small{font-family:var(--font-data);font-weight:500;letter-spacing:0}
+body:not(.md-on) .app td{font-weight:600}
+body:not(.md-on) .app :is(td strong,td b){font-weight:700}
+body:not(.md-on) .app svg text{font-family:var(--font-data);font-variant-numeric:tabular-nums lining-nums;font-weight:500}
+
+/* Kartu: radius 18px dan bayangan halus dari token skin; hanya kartu yang bisa diklik yang terangkat */
+body:not(.md-on) .app :is(.card,.kpi){border-radius:var(--s-summary-r);box-shadow:var(--s-summary-sh-1)}
+@media (hover:hover) and (prefers-reduced-motion:no-preference){
+  body:not(.md-on) .app :is(.kpi.click,.card.click,a.card,button.card){transition:transform .18s var(--ease),box-shadow .18s var(--ease),border-color .18s}
+  body:not(.md-on) .app :is(.kpi.click,.card.click,a.card,button.card):hover{transform:translateY(-2px);box-shadow:var(--s-summary-sh-pop)}
+}
+
+/* Tabel: header lebih tenang, hover baris memakai tint aksen */
+body:not(.md-on) .app th{background:var(--s-summary-surface-2);border-bottom:1px solid var(--s-summary-line-2)}
+@media (hover:hover){
+  body:not(.md-on) .app tr.r:hover td{background:color-mix(in srgb,var(--s-summary-primary) 7%,var(--s-summary-surface))}
+}
+
+/* Rail (sidebar collapse): lebih lega, ikon 44px di tengah */
+body.rail{--sbw:72px}
+body.rail .app .sidebar .ni{width:44px;height:44px;margin-inline:auto;border-radius:14px}
+body.rail .app .sidebar .sbt{margin-inline:auto}
+
+/* ── Pass 3 (DEV-024): lebih lembut & seimbang ─────────────────────────────────────────────────
+ * Bar filter satu baris (shift/status ada di popover periode), KPI kartu terpisah, tab pil, sidebar lebih lapang. */
+
+/* Bar filter ringkas: kontrol berbentuk pil, tanpa label di atas */
+.app .filters{align-items:center;gap:8px;margin-top:10px}
+.app .filters .pbtn{min-width:0;height:36px;gap:10px;padding-inline:14px;border-radius:999px}
+.app .filters .fsearch .fin{width:240px;min-width:0;height:36px;padding-inline:14px;border-radius:999px}
+.app .filters .reset{height:36px;border-radius:999px;padding-inline:16px}
+.app .filters .btn{height:36px;border-radius:999px}
+@media (max-width:640px){
+  .app .filters .fsearch{flex:1 1 100%}
+  .app .filters .fsearch .fin{width:100%}
+}
+
+/* KPI: kartu terpisah (bukan strip menyatu), jarak antar kartu 12px */
+body:not(.md-on) .app .deck{gap:12px;background:transparent;border:0;border-radius:0;overflow:visible}
+body:not(.md-on) .app .deck>.kpi{border:1px solid var(--s-summary-line);padding:16px 18px}
+
+/* Tab: kapsul lembut menggantikan garis bawah */
+body:not(.md-on) .app .tabsrow{border-bottom:0}
+body:not(.md-on) .app .tabsrow .tabs{background:var(--s-summary-surface-3);padding:4px;gap:2px;border-bottom:0;border-radius:999px}
+body:not(.md-on) .app .tabsrow .tab{height:32px;padding:0 16px;margin-bottom:0;border-bottom:0;border-radius:999px}
+body:not(.md-on) .app .tabsrow .tab.on{background:var(--s-summary-surface)!important;color:var(--s-summary-primary);box-shadow:var(--s-summary-sh-1)!important}
+
+/* Sidebar: lebih lapang agar seimbang dengan konten (lebar 256px hanya di layar lebar; iPad tetap 232px) */
+@media (min-width:1280px){body:not(.rail){--sbw:256px}}
+.app .sidebar .ni{height:42px;gap:12px;padding-inline:14px;font-size:14px}
+.app .sidebar .ni svg{width:20px;height:20px}
+.app .sidebar .brand .bt b{font-size:14px}
+.app .sidebar .hlogo{height:28px}
+.app .sidebar .ngrp{font-size:12px;letter-spacing:.04em}
+.app .sidebar .av{width:36px;height:36px}
+body.rail .app .sidebar .ni{height:44px;padding-inline:0}
+
+/* ── Pass 4 (DEV-024): grafik batang lebih halus ───────────────────────────────────────────────
+ * Batang vertikal membulat (rx di charts.tsx), garis bantu putus-putus tipis, batang horizontal berbentuk kapsul. */
+body:not(.md-on) .app svg.ch2 .gl{stroke:var(--s-summary-line);stroke-dasharray:2 5;stroke-linecap:round;opacity:.8}
+body:not(.md-on) .app svg.ch2 .ax{stroke:var(--s-summary-line)}
+body:not(.md-on) .app svg.ch2 .hit.sel,
+body:not(.md-on) .app svg.ch2 .hit:hover{rx:8}
+body:not(.md-on) .app :is(.br .bt,.mini .mt,.rw .bar){border-radius:999px}
+body:not(.md-on) .app :is(.br .bt,.mini .mt,.rw .bar)>i:only-child{border-radius:999px}
+body:not(.md-on) .app .gbar{border-radius:999px}

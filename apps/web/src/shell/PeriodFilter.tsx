@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { IsoDate, RangeQuerySchema } from '@mpd/contracts';
-import { useFilters } from '../lib/filters';
+import { useFilters, type Filters } from '../lib/filters';
 import { add, iso } from '../lib/format';
 import { presetRange, rangeTxt, type Preset } from '../lib/period';
 import '../styles/period-filter.css';
@@ -21,10 +21,17 @@ const earliest = '0001-01-01';
 const dateAtMidnight = (day: string) => new Date(`${day}T00:00:00Z`);
 const daySteps = new Map([['ArrowLeft', -1], ['ArrowRight', 1], ['ArrowUp', -7], ['ArrowDown', 7]]);
 
-export function PeriodFilter() {
-  const { f, setF, applyPreset, today } = useFilters();
+const statusOptions: [Filters['status'], string][] = [
+  ['', 'All machines'], ['attention', 'Perlu perhatian'], ['within', 'Dalam batas capaian'], ['unknown', 'Capaian belum tersedia'],
+];
+
+interface Draft { from: string; to: string; preset: Preset; shift: Filters['shift']; status: Filters['status'] }
+
+/** Satu popover untuk periode + shift + status capaian: bar filter tetap ringkas. */
+export function PeriodFilter({ shifts, showStatus }: { shifts: { value: Filters['shift']; label: string }[]; showStatus: boolean }) {
+  const { f, setF, today } = useFilters();
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState({ from: f.from, to: f.to, preset: f.preset });
+  const [draft, setDraft] = useState<Draft>({ from: f.from, to: f.to, preset: f.preset, shift: f.shift, status: f.status });
   const [cursor, setCursor] = useState(today);
   const [selectingEnd, setSelectingEnd] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
@@ -63,23 +70,23 @@ export function PeriodFilter() {
   function previewPreset(preset: Preset) {
     setSelectingEnd(false);
     if (preset === 'custom') {
-      setDraft({ ...preview, preset });
+      setDraft((d) => ({ ...d, from: preview.from, to: preview.to, preset }));
       return;
     }
     const range = presetRange(preset, today);
-    setDraft({ ...range, preset });
+    setDraft((d) => ({ ...d, ...range, preset }));
     setCursor(range.to);
   }
 
   function updateDate(edge: 'from' | 'to', value: string) {
-    setDraft({ ...preview, [edge]: value, preset: 'custom' });
+    setDraft((d) => ({ ...d, from: preview.from, to: preview.to, [edge]: value, preset: 'custom' }));
     setSelectingEnd(false);
     if (IsoDate.safeParse(value).success && value >= earliest && value <= today) setCursor(value);
   }
 
   function pickDay(day: string) {
     const from = selectingEnd ? draft.from : day;
-    setDraft({ from: from <= day ? from : day, to: from <= day ? day : from, preset: 'custom' });
+    setDraft((d) => ({ ...d, from: from <= day ? from : day, to: from <= day ? day : from, preset: 'custom' }));
     setCursor(day);
     setSelectingEnd(!selectingEnd);
   }
@@ -112,6 +119,12 @@ export function PeriodFilter() {
   nextMonth.setUTCMonth(first.getUTCMonth() + 1);
   const length = add(nextMonth, -1).getUTCDate();
   const weeks = Math.ceil((leading + length) / 7);
+  const activeParts = [
+    f.shift ? shifts.find((shift) => shift.value === f.shift)?.label : undefined,
+    showStatus && f.status ? statusOptions.find(([value]) => value === f.status)?.[1] : undefined,
+  ].filter((part): part is string => Boolean(part));
+  const activeCount = activeParts.length;
+  const activeTitle = activeParts.join(' · ');
 
   function moveMonth(step: number) {
     const next = new Date(first);
@@ -123,32 +136,49 @@ export function PeriodFilter() {
     <div className="f period-filter" ref={wrapper} onBlur={(event) => {
       if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false);
     }}>
-      <span className="fl">Periode</span>
       <button ref={trigger} className="fin pbtn" type="button" aria-haspopup="dialog" aria-expanded={open}
         aria-controls={open ? dialogId : undefined} onClick={() => {
           if (open) { close(); return; }
-          setDraft({ from: f.from, to: f.to, preset: f.preset });
+          setDraft({ from: f.from, to: f.to, preset: f.preset, shift: f.shift, status: f.status });
           setCursor(f.to);
           setSelectingEnd(false);
           setOpen(true);
         }}>
-        <span><b>{labels[f.preset]}</b> <span className="mono mu">{rangeTxt(f.from, f.to)}</span></span><span aria-hidden="true">▾</span>
+        <span><b>{labels[f.preset]}</b> <span className="mono mu">{rangeTxt(f.from, f.to)}</span></span>
+        {activeCount > 0 && <span className="pcount" role="img" title={activeTitle} aria-label={`${activeCount} filter tambahan aktif: ${activeTitle}`}>{activeCount}</span>}
+        <span aria-hidden="true">▾</span>
       </button>
       {open && <form className="period-panel" id={dialogId} role="dialog" aria-label="Filter periode" noValidate onSubmit={(event) => {
         event.preventDefault();
         if (!canApply) return;
-        if (draft.preset === 'custom') setF({ from, to, preset: 'custom' });
-        else applyPreset(draft.preset);
+        setF({
+          ...(draft.preset === 'custom' ? { from, to, preset: 'custom' as const } : { preset: draft.preset }),
+          shift: draft.shift,
+          ...(showStatus ? { status: draft.status } : {}),
+        });
         close();
       }}>
-        <label>Periode cepat
-          <select ref={quickSelect} value={draft.preset} onChange={(event) => previewPreset(event.target.value as Preset)}>
-            {(Object.keys(labels) as Preset[]).map((preset) => <option key={preset} value={preset}>{labels[preset]}</option>)}
-          </select>
-        </label>
         <div className="period-fields">
+          <label>Periode cepat
+            <select ref={quickSelect} value={draft.preset} onChange={(event) => previewPreset(event.target.value as Preset)}>
+              {(Object.keys(labels) as Preset[]).map((preset) => <option key={preset} value={preset}>{labels[preset]}</option>)}
+            </select>
+          </label>
+          <label>Shift
+            <select id="fShift" value={draft.shift} onChange={(event) => setDraft((d) => ({ ...d, shift: event.target.value as Filters['shift'] }))}>
+              <option value="">All shifts</option>
+              {shifts.filter((shift) => shift.value).map((shift) => <option key={shift.value} value={shift.value}>{shift.label}</option>)}
+            </select>
+          </label>
           <label>Dari<input type="date" min={earliest} max={today} value={preview.from} onChange={(event) => updateDate('from', event.target.value)} /></label>
           <label>Sampai<input type="date" min={earliest} max={today} value={preview.to} onChange={(event) => updateDate('to', event.target.value)} /></label>
+          {showStatus && (
+            <label className="period-wide">Status capaian
+              <select id="fStatus" value={draft.status} onChange={(event) => setDraft((d) => ({ ...d, status: event.target.value as Filters['status'] }))}>
+                {statusOptions.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+              </select>
+            </label>
+          )}
         </div>
         <div className="period-calendar">
           <div className="period-month">

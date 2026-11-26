@@ -7,7 +7,7 @@ import { f1, fmt, tokenColor } from '../lib/format';
 import { BarList, RankList } from '../components/charts';
 import { EmptyDeck, Kpi, SkelDeck } from '../components/kpi';
 import { DataTable, Pager, downloadCsv } from '../components/table';
-import { Menu, MenuItem, Tabs, Toggle, useTipProps, useToast } from '../components/ui';
+import { Menu, MenuItem, Tabs, useTipProps, useToast } from '../components/ui';
 import { EnvelopeBanner, emptyMsg } from '../components/state';
 import { shiftLabel } from '../lib/period';
 import { useMonitoring } from '../lib/monitoring';
@@ -59,8 +59,6 @@ export function StopTimePage() {
       ...(v?.details ?? []).map((d, i) => [i + 1, d.detail, catOf(d.categoryId).short, G.get(catOf(d.categoryId).group)?.name ?? '', d.events, d.minutes, f1((d.minutes / (t?.minutes || 1)) * 100), d.machines.join(' ')])]);
     toast('Exported top details');
   };
-  const largest = v?.byCategory[0];
-  const nP = (() => { let c = 0, n = 0; (v?.byCategory ?? []).forEach((r) => { if ((c / (t?.minutes || 1)) * 100 < PL) n++; c += r.minutes; }); return n; })();
   const detailRows = (v?.details ?? []).map((d, i) => ({ ...d, rank: i + 1, share: (d.minutes / (t?.minutes || 1)) * 100 })).filter((d) => !tdQ || `${d.detail} ${catOf(d.categoryId).short}`.toLowerCase().includes(tdQ.toLowerCase()));
   let cumD = 0;
   const detailWithCum = detailRows.map((d) => ({ ...d, cum: ((cumD += d.minutes) / (t?.minutes || 1)) * 100 }));
@@ -80,19 +78,6 @@ export function StopTimePage() {
             </>
           )}
         </div>
-        <div className="card"><div className="strip-note">
-          <span>{largest && t ? <><span className="dot" style={{ background: tokenColor('s-paint-92400e') }} /><b>{nP} of {v.byCategory.length}</b> categories make ~{PL}% of stop time · largest: <b>{catOf(largest.categoryId).short}</b> {fmt(largest.minutes)} min ({Math.round((largest.minutes / t.minutes) * 100)}%)</> : msg || 'No stop time for this filter.'}</span>
-          <span style={{ display: 'flex', gap: 'var(--s-size-12)', alignItems: 'center', flexWrap: 'wrap' }}>
-            <select className="sel2" aria-label="Loss group" value={group} onChange={(e) => { const g = e.target.value as LossGroup | ''; setGroup(g); if (cat && g && catOf(cat).group !== g) setCat(''); }}>
-              <option value="">All loss groups</option>{(v?.groups ?? []).filter((g) => g.id !== 'unmapped').map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
-            <select className="sel2" aria-label="Category" value={cat} onChange={(e) => setCat(e.target.value)}>
-              <option value="">All categories ({v?.categories.length ?? 0})</option>
-              {(v?.categories ?? []).filter((c) => !group || c.group === group).map((c) => <option key={c.id} value={c.id}>{c.short}{c.infoOnly ? ' (info)' : ''}</option>)}
-            </select>
-            <Toggle on={info} onChange={setInfo}>Include info-only stops</Toggle>
-          </span>
-        </div></div>
         <Tabs value={tab} onChange={setTab} items={[{ id: 'stop-0', label: 'Overview' }, { id: 'stop-1', label: 'By machine' }, { id: 'stop-2', label: 'By product' }, { id: 'stop-3', label: 'Top details' }, { id: 'stop-4', label: 'Ranking & shift' }]}
           right={<div className="legend">{(v?.groups ?? []).filter((g) => g.id !== 'unmapped').map((g) => <span key={g.id}><i style={{ background: tokenColor(g.color) }} />{g.name}</span>)}</div>} />
         {tab === 'stop-0' && (
@@ -105,7 +90,7 @@ export function StopTimePage() {
                   {(v?.byGroup ?? []).map((g) => (
                     <tr key={g.group}><td><span className="sw" style={{ background: tokenColor(G.get(g.group)?.color ?? '') }} />{G.get(g.group)?.name} <span className="fa">· {g.categories} cat.</span></td><td className="n m">{fmt(g.events)}×</td><td className="n m"><b>{fmt(g.minutes)}</b> min</td><td className="n m">{Math.round((g.minutes / (t?.minutes || 1)) * 100)}%</td></tr>
                   ))}
-                  {!info && <tr><td colSpan={4} className="fa wrap" style={{ fontSize: 'var(--s-size-12)', border: 'none' }}>Info-only categories are hidden. Switch on “Include info-only stops” to show them.</td></tr>}
+                  {!info && <tr><td colSpan={4} className="fa wrap" style={{ fontSize: 'var(--s-size-12)', border: 'none' }}>Info-only categories are hidden.</td></tr>}
                 </tbody></table>
               </div>
             </div>

@@ -90,7 +90,7 @@ export function Chart(o: ChartOpts) {
       o.bars.forEach((b, j) => {
         const v = b.vals[i];
         if (v == null) return;
-        seg.push({ x: x + (bw - w * k) / 2 + j * w, y: y(v), w: Math.max(1, w - 1), h: H - B - y(v), fill: b.cols ? b.cols[i] : b.col, rx: 1.5 });
+        seg.push({ x: x + (bw - w * k) / 2 + j * w, y: y(v), w: Math.max(1, w - 1), h: H - B - y(v), fill: b.cols ? b.cols[i] : b.col, rx: Math.min(5, Math.max(1.5, w / 3)) });
       });
     }
     seg.forEach((r, j) => {
@@ -108,7 +108,7 @@ export function Chart(o: ChartOpts) {
   });
   (o.off ?? []).forEach((i) => {
     const x = L + i * bw;
-    grid.push(<rect key={`o${i}`} x={x} y={Tp} width={bw} height={H - Tp - B} fill="var(--line-2)" opacity={0.28} pointerEvents="none" />,
+    grid.push(<rect key={`o${i}`} x={x} y={Tp} width={bw} height={H - Tp - B} fill="var(--line-2)" opacity={0.22} rx={8} pointerEvents="none" />,
       <text key={`ot${i}`} x={x + bw / 2} y={Tp + 11} textAnchor="middle" style={{ fontSize: 'var(--s-size-12)', fill: 'var(--faint)' }} pointerEvents="none">{o.offLabel ?? 'off'}</text>);
   });
   grid.push(<line key="ax" className="ax" x1={L} x2={W - R} y1={H - B} y2={H - B} />);
