@@ -1,0 +1,52 @@
+/* Skin "Industrial Velvet" — layer struktural (sidebar, topbar, hero band, KPI).
+ * Pelengkap packages/ui-tokens/skin-velvet.css. Selector sengaja diawali `.app` agar menang atas app.css
+ * tanpa !important dan tanpa mengedit file hasil ekstrak. Hanya tampilan; markup tidak berubah.
+ * Referensi: docs/06-testing/deviation-log.md (DEV-023). */
+body{letter-spacing:-.005em}
+.app .bh h1{font-weight:750;letter-spacing:-.015em}
+.app .kpi .kv b{font-weight:800;letter-spacing:-.03em}
+
+/* Sidebar: panel navy mengambang (velvet) */
+.app .sidebar{
+  top:12px;height:calc(100dvh - 24px);margin:12px 0 12px 12px;
+  border:1px solid rgba(255,255,255,.14);border-radius:27px;
+  background:linear-gradient(160deg,#104483 0%,#09264d 56%);
+  box-shadow:0 12px 30px rgba(8,39,76,.19);color:#fff;overflow:hidden;
+  scrollbar-color:rgba(255,255,255,.3) transparent;
+}
+body.dark .app .sidebar{background:linear-gradient(160deg,#0f2a4f 0%,#07182f 56%);border-color:rgba(255,255,255,.08)}
+.app .sidebar *{scrollbar-color:rgba(255,255,255,.3) transparent}
+.app .sidebar :focus-visible{outline-color:#fff}
+.app .sidebar .brand{border-bottom-color:rgba(255,255,255,.14)}
+.app .sidebar .hlogo,body.dark .app .sidebar .hlogo{filter:brightness(0) invert(1)}
+.app .sidebar .bsep{background:rgba(255,255,255,.28)}
+.app .sidebar .bt b{color:#fff}
+.app .sidebar .bt small{color:rgba(255,255,255,.7)}
+.app .sidebar .sbt{color:rgba(255,255,255,.8)}
+.app .sidebar .ngrp{color:rgba(255,255,255,.64)}
+.app .sidebar .ni{color:rgba(255,255,255,.86);border-radius:14px}
+.app .sidebar .ni.on{background:#e7f1ff;color:#09264d;box-shadow:none}
+body.dark .app .sidebar .ni.on{background:rgba(231,241,255,.18);color:#fff}
+.app .sidebar .ni .tag{background:rgba(255,255,255,.14);color:rgba(255,255,255,.88)}
+.app .sidebar .ni.on .tag{background:rgba(9,38,77,.12);color:#09264d}
+.app .sidebar .ni.dis:not(.on){color:rgba(255,255,255,.55)}
+.app .sidebar .sbfoot{border-top-color:rgba(255,255,255,.14)}
+.app .sidebar .ubox{background:rgba(255,255,255,.08);color:#fff;border-radius:14px}
+.app .sidebar .ubox.on{background:rgba(255,255,255,.16)}
+.app .sidebar .ubox small{color:rgba(255,255,255,.72)}
+.app .sidebar .ubox .chev2{color:rgba(255,255,255,.62)}
+.app .sidebar .av{background:#e7f1ff;color:#09264d}
+.app .sidebar .sbver{color:rgba(255,255,255,.62)}
+body.rail .app .sidebar .ngrp{background:rgba(255,255,255,.18)}
+@media (hover:hover){
+  .app .sidebar .sbt:hover{background:rgba(255,255,255,.12);color:#fff}
+  .app .sidebar .ni:hover:not(.on){background:rgba(255,255,255,.1);color:#fff}
+  .app .sidebar .ubox:hover{background:rgba(255,255,255,.14)}
+}
+
+/* Topbar: kaca tipis dengan bayangan halus (tetap full-width agar offset sticky halaman tidak bergeser) */
+.app .topbar{background:color-mix(in srgb,var(--surface) 93%,transparent);backdrop-filter:blur(10px);box-shadow:var(--sh-1)}
+
+/* Hero band halaman */
+.app .band{background:linear-gradient(135deg,#104483 0%,#09264d 100%)}
+body.dark .app .band{background:linear-gradient(135deg,#0f2a4f 0%,#07182f 100%)}
