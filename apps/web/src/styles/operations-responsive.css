@@ -1,0 +1,24 @@
+/* Shared form sizing for operations, reports, and system status. */
+.app .filters { flex-wrap: wrap; min-width: 0; }
+.app .filters > label { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; max-width: 100%; min-width: 0; }
+.app .filters :is(input,select) { max-width: 100%; min-width: 0; }
+.app .content .tw { max-width: 100%; overflow-x: auto; }
+.app .system-status-list dd { overflow-wrap: anywhere; min-width: 0; }
+@media (pointer: coarse) {
+  .app .filters :is(button,select,input:not([type=checkbox])) { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app :is(.card,.kpi,.ni,.btn) { transition: none !important; animation: none !important; }
+  .app :is(.card,.kpi,.ni):hover { transform: none !important; }
+}
+
+/* Machine Detail owns its vertical scroll area; avoid reserving a second root gutter. */
+html:has(body.md-on) { scrollbar-gutter: auto; }
+body.md-on #root, body.md-on #root > .app { min-width: 0; max-width: 100%; }
+body.md-on .app .main, body.md-on #v-detail, body.md-on #mdHost { min-width: 0; max-width: 100%; }
+body.md-on .app .topbar { min-width: 0; max-width: 100%; }
+body.md-on .app .topbar :is(.crumb,.co) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.md-on .app .topbar .tr { min-width: 0; }
+@media (max-width: 1200px) {
+  body.md-on .app .topbar .co { flex: 1 1 0; }
+}

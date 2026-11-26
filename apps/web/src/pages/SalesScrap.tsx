@@ -32,8 +32,8 @@ export function SalesPage() {
           <Kpi l="Average price" v={v.averagePrice.value === null ? '—' : fmtPrice(Math.round(v.averagePrice.value * 100) / 100)} u="Rp/pcs" title={v.averagePrice.reason ?? undefined} />
         </div>
       ) : q.isPending ? <SkelDeck n={3} /> : <div className="deck"><EmptyDeck labels={['Sales', 'Production actual', 'Average price']} msg={msg} /></div>}
-      {v && <p className="note">Periode ini dinilai dengan harga part yang berlaku saat laporan dimuat.</p>}
-      {v && v.uncoveredQty > 0 && <div className="banner w" role="status">{fmt(v.uncoveredQty)} pcs output berasal dari part tanpa Harga/PCS di <Link className="lnk" to="/master-data">Master Data</Link>. Output itu tidak dihitung ke Sales (bukan dianggap Rp 0).</div>}
+      {v && <p className="note">Valuasi memakai harga terakhir yang tercatat sampai akhir tanggal produksi (tanggal lokal plant). Harga sebelum histori dimulai tidak ditebak. Kolom harga kosong juga dapat berarti harga berbeda dalam periode.</p>}
+      {v && v.uncoveredQty > 0 && <div className="banner w" role="status">{fmt(v.uncoveredQty)} pcs output tidak memiliki Harga/PCS yang tercatat untuk tanggal produksi. Output itu tidak dihitung ke Sales (bukan dianggap Rp 0). Periksa <Link className="lnk" to="/operations">riwayat harga</Link>.</div>}
       <div className="g2e">
         <div className="card"><div className="ch"><div><h3>Sales per month</h3><p>Rp · bulan di dalam rentang tanggal yang dipilih</p></div></div><div className="cb">
           {v && v.byMonth.length ? <Chart aria="Sales per month" labels={v.byMonth.map((m) => monthLbl(m.key))} h={240} bw={28} yFmt={kf} vFmt={kf} tipT={(i) => monthLbl(v.byMonth[i]!.key)}
@@ -98,7 +98,7 @@ export function ScrapPage() {
           <Kpi l="Scrap ratio" v={v.ratio.value === null ? '—' : v.ratio.value.toFixed(2)} u={v.ratio.value === null ? undefined : '%'} title={v.ratio.reason ?? undefined} desc="scrap value ÷ sales value" />
         </div>
       ) : q.isPending ? <SkelDeck n={3} /> : <div className="deck"><EmptyDeck labels={['Scrap value', 'Scrap weight', 'Scrap ratio']} msg={msg} /></div>}
-      {v && <div className="banner w" role="status">Nilai dan rasio Scrap masih menunggu persetujuan Quality/Finance. Valuasi memakai mapping dan harga Master Data saat laporan dimuat.</div>}
+      {v && <div className="banner w" role="status">Nilai dan rasio Scrap masih menunggu persetujuan Quality/Finance. Harga dan mapping part-material mengikuti tanggal efektif produksi. Nilai sebelum histori dimulai tidak ditebak; kolom material atau harga kosong juga dapat berarti nilainya berbeda dalam periode.</div>}
       {v?.priceUnitSuspect && <div className="banner w" role="status"><b>Cek satuan harga material.</b> Ada harga material ≥ Rp 10.000 per gram, yang tidak wajar untuk resin; kemungkinan harga di CSV per kg. Kalau benar, Scrap value dan ratio terlihat 1.000× terlalu besar. Perbaiki di <Link className="lnk" to="/master-data">Master Data</Link>.</div>}
       {v && v.unvaluedGram > 0 && <div className="banner w" role="status">{fmt(v.unvaluedGram)} gram scrap berasal dari part tanpa material atau material tanpa harga di <Link className="lnk" to="/master-data">Master Data</Link>. Gram itu tercatat di Scrap weight tetapi tidak dihitung ke Scrap value (bukan dianggap Rp 0).</div>}
       {v && v.recordsWithoutGram > 0 && <div className="banner w" role="status">{fmt(v.recordsWithoutGram)} dari {fmt(v.recordsTotal)} record produksi belum punya NG (gram) di ConMas. Record itu tidak dihitung sebagai scrap 0.</div>}

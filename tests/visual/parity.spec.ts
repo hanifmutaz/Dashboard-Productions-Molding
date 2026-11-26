@@ -134,11 +134,14 @@ test('UI behavior · Sales exposes period and shift', async ({ page }) => {
   await openFilters(page);
   await expect(page.locator('#fShift')).toBeVisible();
   await expect(page.locator('#fStatus')).toHaveCount(0);
-  await expect(page.getByText('Periode ini dinilai dengan harga part yang berlaku saat laporan dimuat.')).toBeVisible();
+  await expect(page.getByText('Valuasi memakai harga terakhir yang tercatat sampai akhir tanggal produksi (tanggal lokal plant). Harga sebelum histori dimulai tidak ditebak. Kolom harga kosong juga dapat berarti harga berbeda dalam periode.', { exact: true })).toBeVisible();
 });
 
-test('UI behavior · Machine Detail fits beside the full sidebar', async ({ page }) => {
-  await page.setViewportSize({ width: 1024, height: 768 });
+for (const viewport of [{width:1024,height:768},{width:1133,height:744},{width:1180,height:820},{width:1366,height:1024}]) {
+test.describe(`Viewport ${viewport.width}x${viewport.height}`, () => {
+  // Initialise viewport and screen before creating the page, preserving mobile/touch emulation.
+  test.use({ viewport, screen: viewport });
+test(`UI behavior · Machine Detail fits beside the full sidebar (${viewport.width}x${viewport.height})`, async ({ page }) => {
   await stub(page);
   await page.route('**/api/me/preferences', (r) => r.fulfill({ json: { page: 'prod', period: 'lw_tw', shift: '', theme: 'light', side: 'full', motion: 'off', cols: [] } }));
   await page.route('**/api/v1/machines?**', (r) => r.fulfill({ json: env({ date: '2026-11-07', prevDate: null, nextDate: null, machines: [{ machineNo: '20' }] }) }));
@@ -152,10 +155,33 @@ test('UI behavior · Machine Detail fits beside the full sidebar', async ({ page
   await page.goto('/machines/20');
   const figures = page.locator('#mdHost .page.on .figs');
   await expect(figures).toContainText('120,000');
+  await expect(page.locator('#mdHost .page.on .output-summary')).toBeVisible();
+  await expect(figures.locator(':scope > div')).toHaveCount(6);
   const bounds = await figures.evaluate((element) => {
-    const parent = element.closest('.hero')!.getBoundingClientRect();
-    const children = [...element.querySelectorAll('.fig')];
-    return { fits: children.every((child) => child.getBoundingClientRect().right <= parent.right + 1), figures: children.length };
+    const card = element.closest('.output-summary');
+    if (!card) throw new Error('Output summary card not found');
+    const parent = card.getBoundingClientRect();
+    const children = [...element.querySelectorAll(':scope > div')];
+    return { fits: children.every((child) => { const rect = child.getBoundingClientRect(); return rect.left >= parent.left - 1 && rect.right <= parent.right + 1; }), figures: children.length };
   });
   expect(bounds).toEqual({ fits: true, figures: 6 });
+  const layout = await page.evaluate(() => {
+    const width = window.innerWidth;
+    const offenders = [...document.querySelectorAll('body *')].flatMap((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && rect.right > width + 1
+        ? [{ element: el.tagName, id: el.id, className: el.getAttribute('class'), right: Math.round(rect.right), width: Math.round(rect.width) }]
+        : [];
+    }).slice(0, 20);
+    return { width, clientWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth,
+      rootWidth: document.documentElement.getBoundingClientRect().width, screenWidth: screen.width, screenHeight: screen.height,
+      visualWidth: visualViewport?.width ?? null, visualScale: visualViewport?.scale ?? null,
+      dpr: devicePixelRatio, viewportMeta: document.querySelector('meta[name="viewport"]')?.getAttribute('content'), offenders };
+  });
+  const diagnostic = JSON.stringify({ requested: viewport, actual: layout });
+  // Never silently pass a test at an incorrectly emulated viewport.
+  expect(Math.abs(layout.width - viewport.width), `Viewport emulation mismatch: ${diagnostic}`).toBeLessThanOrEqual(1);
+  expect(layout.scrollWidth, diagnostic).toBeLessThanOrEqual(layout.width + 1);
 });
+});
+}

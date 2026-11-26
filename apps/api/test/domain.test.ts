@@ -59,6 +59,15 @@ describe('ConMas normalisation', () => {
     expect(r.records.map((x) => x.recordId)).toEqual(['c']);
     expect(r.dropped).toBe(2);
   });
+  it('flags ambiguous revisions and gives identical tie resolution regardless of row order', () => {
+    const base = normalizeRow(row, cfg)!;
+    const a = { rec: { ...base, recordId: 'a', dpNo: 'DP1', updatedAt: '2026-11-04T08:00:00+07:00' }, rev: 2 };
+    const b = { rec: { ...base, recordId: 'b', dpNo: 'DP2', updatedAt: '2026-11-04T08:00:00+07:00' }, rev: 2 };
+    const r = selectLatest([a, b]);
+    expect(r.ambiguousGroups).toBe(1);
+    expect(r.dropped).toBe(1);
+    expect(r.records).toEqual(selectLatest([b, a]).records);
+  });
   it('info-only category is never counted as loss', () => {
     const cats: StopCategory[] = [
       { id: 'dandori', short: 'Dandori', name: 'Dandori loss (Set up & Adjustment loss)', group: 'setup', oeeBucket: 'A', infoOnly: false, color: 'x', aliases: ['Dandori loss(Set up & Adjust ment loss)'], details: [], notes: null, version: 0 },
@@ -84,16 +93,19 @@ describe('freshness (FINAL 15/60)', () => {
     expect(applyFreshness([rec('2026-11-09', '2026-11-09T09:50:00+07:00')], now, th).freshness).toBe('current');
     expect(applyFreshness([rec('2026-11-09', '2026-11-09T09:30:00+07:00')], now, th).freshness).toBe('stale');
     const old = applyFreshness([rec('2026-11-09', '2026-11-09T08:00:00+07:00'), rec('2026-11-08', '2026-11-08T23:00:00+07:00')], now, th);
-    expect(old.freshness).toBe('unavailable');
-    expect(old.records.map((r) => r.date)).toEqual(['2026-11-08']);
+    expect(old.freshness).toBe('stale');
+    expect(old.records.map((r) => r.date)).toEqual(['2026-11-09', '2026-11-08']);
+    expect(old.notices[0]?.code).toBe('TOO_OLD');
     expect(applyFreshness([rec('2026-11-09', null)], now, th).freshness).toBe('unknown');
+    expect(applyFreshness([rec('2026-11-09', '2026-11-09T11:00:00+07:00')], now, th).freshness).toBe('unknown');
     expect(applyFreshness([rec('2026-11-01', '2026-11-02T08:00:00+07:00')], now, th).freshness).toBe('not-applicable');
     expect(applyFreshness([], now, th, 420, 6, true).notices[0]?.code).toBe('NO_TODAY_RECORDS');
     const recent = { ...rec('2026-11-09', '2026-11-09T09:50:00+07:00'), machineNo: '01' };
     const delayed = { ...rec('2026-11-09', '2026-11-09T08:00:00+07:00'), machineNo: '02' };
     const mixed = applyFreshness([recent, delayed], now, th);
     expect(mixed.freshness).toBe('stale');
-    expect(mixed.records).toEqual([recent]);
+    expect(mixed.records).toEqual([recent, delayed]);
+    expect(mixed.notices[0]?.message).toContain('bukan data real-time');
   });
 });
 

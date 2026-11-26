@@ -26,6 +26,7 @@ const requiredMigrations = migrationFiles();
 const app = createApp({
   repos,
   requiredMigrations,
+  operationsPool: appPool,
   conmas: createConmasSource(conmasPool, {
     view: config.CONMAS_VIEW, tzOffset: offset, cacheTtlSeconds: Math.min(config.CONMAS_CACHE_TTL_SECONDS, 60),
     cols: { recordId: config.CONMAS_COL_RECORD_ID, revNo: config.CONMAS_COL_REV_NO, deleted: config.CONMAS_COL_DELETED, updatedAt: config.CONMAS_COL_UPDATED_AT },
@@ -37,7 +38,7 @@ const app = createApp({
       technician: config.CONMAS_COL_TECHNICIAN_NAME,
       operator: config.CONMAS_COL_OPERATOR_NAME,
     },
-  }, log),
+  }, log, appPool),
   log,
   publicOrigin: config.PUBLIC_ORIGIN,
   cookieSecure: config.COOKIE_SECURE,

@@ -1,13 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { ApiFailure } from '../lib/api';
+import { SystemMonitorPanel } from './SystemMonitorPanel';
 
 interface Readiness {
+  latencyMs?: number;
   appDb: 'up' | 'down';
   schema: 'ready' | 'not-ready';
   conmas: 'up' | 'unavailable';
 }
 
 async function loadReadiness(signal: AbortSignal): Promise<Readiness> {
+  const started = performance.now();
   let response: Response;
   try {
     response = await fetch('/api/health/ready', {
@@ -21,7 +24,7 @@ async function loadReadiness(signal: AbortSignal): Promise<Readiness> {
   const body = response.ok || response.status === 503 ? await response.json().catch(() => null) as Partial<Readiness> | null : null;
   if ((body?.appDb === 'up' || body?.appDb === 'down') && (body.schema === 'ready' || body.schema === 'not-ready')
     && (body.conmas === 'up' || body.conmas === 'unavailable')) {
-    return { appDb: body.appDb, schema: body.schema, conmas: body.conmas };
+    return { appDb: body.appDb, schema: body.schema, conmas: body.conmas, latencyMs: Math.round(performance.now() - started) };
   }
   throw new ApiFailure(response.status, 'BAD_RESPONSE', 'Status server belum bisa diperiksa.');
 }
@@ -31,6 +34,7 @@ export function SystemStatusPage() {
     queryKey: ['system-readiness'],
     queryFn: ({ signal }) => loadReadiness(signal),
     retry: false,
+    refetchInterval: 60_000,
   });
   const info = check.isSuccess ? check.data : null;
   const rows = info ? [
@@ -51,6 +55,7 @@ export function SystemStatusPage() {
         <div className="cb">
           {check.isPending && <p role="status">Memeriksa status server…</p>}
           {check.isError && <div className="banner e" role="alert">{check.error instanceof ApiFailure ? check.error.message : 'Status server belum bisa diperiksa.'}</div>}
+          {info && <p>Readiness request: {info.latencyMs} ms</p>}
           {info && (
             <dl className="system-status-list" aria-label="Hasil pemeriksaan">
               {rows.map(({ label, ok, fail }) => (
@@ -60,6 +65,7 @@ export function SystemStatusPage() {
           )}
         </div>
       </section>
+      <SystemMonitorPanel />
     </div></section>
   );
 }

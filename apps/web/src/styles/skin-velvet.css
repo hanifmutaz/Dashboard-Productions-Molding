@@ -68,8 +68,8 @@ body:not(.md-on) .app svg text{font-family:var(--font-data);font-variant-numeric
 /* Kartu: radius 18px dan bayangan halus dari token skin; hanya kartu yang bisa diklik yang terangkat */
 body:not(.md-on) .app :is(.card,.kpi){border-radius:var(--s-summary-r);box-shadow:var(--s-summary-sh-1)}
 @media (hover:hover) and (prefers-reduced-motion:no-preference){
-  body:not(.md-on) .app :is(.kpi.click,.card.click,a.card,button.card){transition:transform .18s var(--ease),box-shadow .18s var(--ease),border-color .18s}
-  body:not(.md-on) .app :is(.kpi.click,.card.click,a.card,button.card):hover{transform:translateY(-2px);box-shadow:var(--s-summary-sh-pop)}
+  body:not(.md-on) .app :is(.kpi,.card){transition:transform .18s var(--ease),box-shadow .18s var(--ease),border-color .18s}
+  body:not(.md-on) .app :is(.kpi,.card):hover{transform:translateY(-3px);box-shadow:var(--s-summary-sh-pop)}
 }
 
 /* Tabel: header lebih tenang, hover baris memakai tint aksen */

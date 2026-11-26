@@ -6,6 +6,8 @@ import {
 import { machineSort, type SourceRecord } from '../conmas/source.js';
 import { GROUPS } from './categories.js';
 import { aggregateRate, bekidoritsu, ipr, kikai, quality, salesValue, scrapKg, scrapRatio, scrapValue, shugyo, sogo, sumNullable } from './formulas.js';
+import { uniformPrice, type PriceLookup, type MaterialLookup } from './historicalPricing.js';
+import { scheduledMinutes, type CalendarLookup } from './scheduledCalendar.js';
 
 export interface Ev { date: string; shift: '1' | '2' | '3'; machineNo: string; productName: string | null; cat: StopCategoryRef; detail: string; minutes: number; startMinuteOfDay: number }
 export type Resolve = (text: string) => StopCategoryRef;
@@ -20,7 +22,8 @@ function groupBy<T, K>(a: T[], f: (x: T) => K): Map<K, T[]> {
   const m = new Map<K, T[]>();
   a.forEach((x) => {
     const k = f(x);
-    m.set(k, [...(m.get(k) ?? []), x]);
+    const list = m.get(k);
+    if (list) list.push(x); else m.set(k, [x]);
   });
   return m;
 }
@@ -113,10 +116,10 @@ function conmasRates(rs: SourceRecord[]): { oee: Metric; availability: Metric; p
   const of = (pick: (r: SourceRecord) => number | null, label: string) => aggregateRate(rs.map((r) => ({ value: pick(r), weight: r.plannedMinutes })), label);
   return { oee: of((r) => r.oee, 'OEE'), availability: of((r) => r.availability, 'Availability'), performance: of((r) => r.performance, 'Performance') };
 }
-function utilTotals(rs: SourceRecord[], machineCount: number, days: number, calPer: number, resolve: Resolve): UtilizationTotals {
+function utilTotals(rs: SourceRecord[], machineCount: number, days: number, calPer: number, resolve: Resolve, scheduleTotal?: number): UtilizationTotals {
   const planned = sum(rs, (r) => r.plannedMinutes ?? 0);
   const stop = sum(rs, (r) => sum(eventsOf(r, resolve).loss, (e) => e.minutes));
-  const calendar = machineCount * days * calPer;
+  const calendar = machineCount * (scheduleTotal ?? days * calPer);
   const actual = sum(rs, (r) => r.actual ?? 0), plan = sum(rs, (r) => r.plan ?? 0);
   return {
     kikai: kikai(planned, stop), sogo: sogo(planned, stop, calendar), shugyo: shugyo(planned, calendar),
@@ -126,12 +129,15 @@ function utilTotals(rs: SourceRecord[], machineCount: number, days: number, calP
   };
 }
 
-export function buildUtilization(records: SourceRecord[], prev: SourceRecord[] | null, range: Range, s: SettingsBody, resolve: Resolve): UtilizationView {
+export function buildUtilization(records: SourceRecord[], prev: SourceRecord[] | null, range: Range, s: SettingsBody, resolve: Resolve, schedule?: CalendarLookup): UtilizationView {
   const rs = filterShift(records, range.shift);
   const calPer = range.shift ? s.cal.shift : s.cal.day;
+  const total = schedule ? scheduledMinutes(range,schedule) ?? 0 : undefined;
+  const prevRange = { ...range, from: new Date(Date.parse(range.from)-range.days*864e5).toISOString().slice(0,10), to: new Date(Date.parse(range.from)-864e5).toISOString().slice(0,10) };
+  const prevTotal = schedule ? scheduledMinutes(prevRange,schedule) ?? 0 : undefined;
   const byMc = groupBy(rs, (r) => r.machineNo);
   const machines: MachineUtilization[] = [...byMc.entries()].sort((a, b) => machineSort(a[0], b[0])).map(([machineNo, list]) => {
-    const t = utilTotals(list, 1, range.days, calPer, resolve);
+    const t = utilTotals(list, 1, range.days, calPer, resolve,total);
     const loss = new Map<string, { category: string; categoryId: string; color: string; minutes: number }>();
     const rej = new Map<string, number>();
     list.forEach((r) => {
@@ -155,8 +161,8 @@ export function buildUtilization(records: SourceRecord[], prev: SourceRecord[] |
   const prevRs = prev ? filterShift(prev, range.shift) : [];
   return {
     range, machines,
-    totals: utilTotals(rs, byMc.size, range.days, calPer, resolve),
-    previous: prevRs.length ? utilTotals(prevRs, new Set(prevRs.map((r) => r.machineNo)).size, range.days, calPer, resolve) : null,
+    totals: utilTotals(rs, byMc.size, range.days, calPer, resolve,total),
+    previous: prevRs.length ? utilTotals(prevRs, new Set(prevRs.map((r) => r.machineNo)).size, range.days, calPer, resolve,prevTotal) : null,
   };
 }
 
@@ -241,7 +247,7 @@ export function hourlyOutput(rs: SourceRecord[], starts: readonly number[]): Mac
 export function latestMachineRecord(records: SourceRecord[], machineNo: string, date: string): SourceRecord | null {
   let latest: SourceRecord | null = null;
   for (const record of records) {
-    if (record.machineNo === machineNo && record.date === date && (!latest || record.shift > latest.shift)) latest = record;
+    if (record.machineNo === machineNo && record.date === date && (!latest || record.shift > latest.shift || (record.shift === latest.shift && (Date.parse(record.updatedAt ?? '') || -Infinity) > (Date.parse(latest.updatedAt ?? '') || -Infinity)))) latest = record;
   }
   return latest;
 }
@@ -254,12 +260,14 @@ export function buildMachineDetail(machineNo: string, date: string, records: Sou
   const dayMin = (m: number) => (m - starts[0] * 60 + 1440) % 1440;
   const stops = allEv.flatMap(({ e }) => e.loss).sort((a, b) => Number(a.shift) - Number(b.shift) || dayMin(a.startMinuteOfDay) - dayMin(b.startMinuteOfDay));
   const shifts = (['1', '2', '3'] as const).map((shift, i) => {
-    const r = rs.find((x) => x.shift === shift);
+    const list = rs.filter((x) => x.shift === shift);
+    const r = list[0];
     if (!r) return { shift, time: shiftTime(i), hasRecord: false, group: null, plan: null, actual: null, gross: null, reject: null, ipr: metric(null, 'Tidak ada record'), deviation: null, stopMinutes: null, bekidoritsu: metric(null, 'Tidak ada record') };
-    const plan = r.plan ?? 0, actual = r.actual ?? 0;
+    const plan = sumNullable(list.map(x=>x.plan)), actual = sumNullable(list.map(x=>x.actual)), gross = sumNullable(list.map(x=>x.gross)), reject = sumNullable(list.map(x=>x.ngQty));
+    const group = list.every(x=>x.group===r.group)?r.group:null;
     return {
-      shift, time: shiftTime(i), hasRecord: true, group: r.group, plan: r.plan, actual: r.actual, gross: r.gross, reject: r.ngQty, ipr: ipr(r.ngQty, actual),
-      deviation: actual - plan, stopMinutes: sum(stops.filter((e) => e.shift === shift), (e) => e.minutes), bekidoritsu: bekidoritsu(actual, plan),
+      shift, time: shiftTime(i), hasRecord: true, group, plan, actual, gross, reject, ipr: ipr(reject, actual ?? 0),
+      deviation: (actual ?? 0) - (plan ?? 0), stopMinutes: sum(stops.filter((e) => e.shift === shift), (e) => e.minutes), bekidoritsu: bekidoritsu(actual ?? 0, plan ?? 0),
     };
   });
   const t = prodTotals(rs, resolve);
@@ -296,7 +304,7 @@ export function buildMachineDetail(machineNo: string, date: string, records: Sou
 }
 
 /** Daily rate table for the modal (approved formulas only). */
-export function buildDailyRates(records: SourceRecord[], range: Range, machineNo: string | null, s: SettingsBody, resolve: Resolve): DailyRatesView {
+export function buildDailyRates(records: SourceRecord[], range: Range, machineNo: string | null, s: SettingsBody, resolve: Resolve, schedule?: CalendarLookup): DailyRatesView {
   const rs = filterShift(records, range.shift).filter((r) => !machineNo || r.machineNo === machineNo);
   const calPer = range.shift ? s.cal.shift : s.cal.day;
   const machines = new Set(rs.map((r) => r.machineNo)).size;
@@ -306,7 +314,7 @@ export function buildDailyRates(records: SourceRecord[], range: Range, machineNo
       const d = rs.filter((r) => r.date === date);
       const plan = sum(d, (r) => r.plan ?? 0), actual = sum(d, (r) => r.actual ?? 0);
       const planned = sum(d, (r) => r.plannedMinutes ?? 0), stop = sum(d, (r) => sum(eventsOf(r, resolve).loss, (e) => e.minutes));
-      const cal = d.length ? machines * calPer : 0;
+      const cal = d.length ? machines * (schedule ? schedule(date,range.shift) ?? 0 : calPer) : 0;
       return { date, plan, actual, bekidoritsu: bekidoritsu(actual, plan), calendarMinutes: cal, plannedMinutes: planned, stopMinutes: stop, runningMinutes: Math.max(0, planned - stop), kikai: kikai(planned, stop), sogo: sogo(planned, stop, cal), shugyo: shugyo(planned, cal) };
     }),
   };
@@ -316,9 +324,9 @@ export function buildDailyRates(records: SourceRecord[], range: Range, machineNo
 /** Kunci pencocokan DP Part antara ConMas dan Master Data: tanpa spasi pinggir, tidak peka huruf besar/kecil. */
 export const partKey = (dpNo: string | null): string | null => (dpNo?.trim() ? dpNo.trim().toUpperCase() : null);
 
-export function buildSales(records: SourceRecord[], prices: ReadonlyMap<string, number | null>, range: Range): SalesView {
+export function buildSales(records: SourceRecord[], prices: ReadonlyMap<string, number | null>, range: Range, history?: PriceLookup): SalesView {
   const rs = filterShift(records, range.shift);
-  const priceOf = (r: SourceRecord) => { const k = partKey(r.dpNo); return k ? prices.get(k) ?? null : null; };
+  const priceOf = (r: SourceRecord) => { const k = partKey(r.dpNo); return k ? (history ? history('part', k, r.date) : prices.get(k) ?? null) : null; };
   const line = (r: SourceRecord) => {
     const qty = r.actual !== null && r.actual > 0 ? r.actual : 0;
     const s = salesValue(r.actual, priceOf(r));
@@ -332,12 +340,14 @@ export function buildSales(records: SourceRecord[], prices: ReadonlyMap<string, 
   const byMonthMap = groupBy(rs, (r) => r.date.slice(0, 7));
   const all = rs.map(line);
   const goodQty = sum(all, (x) => x.qty), uncoveredQty = sum(all, (x) => x.uncovered), coveredQty = goodQty - uncoveredQty, totalRp = sum(all, (x) => x.sales);
-  const total = all.some((x) => x.valued) ? metric(totalRp) : metric(null, goodQty > 0 ? 'Harga/PCS belum diisi di Master Data untuk part pada periode ini' : 'Tidak ada output pada periode ini');
+  const total = all.some((x) => x.valued) ? metric(totalRp) : metric(null, goodQty > 0 ? 'Harga/PCS belum tersedia untuk part pada periode ini' : 'Tidak ada output pada periode ini');
   const byPart: SalesPartRow[] = [...groupBy(rs, (r) => partKey(r.dpNo) ?? '—').entries()].map(([k, list]) => {
-    const qty = sum(list.map(line), (x) => x.qty);
-    const price = k === '—' ? null : prices.get(k) ?? null;
+    const lines = list.map(line);
+    const qty = sum(lines, (x) => x.qty);
+    const price = uniformPrice(list.map(priceOf));
     const latest = [...list].reverse().find((r) => r.productName);
-    return { dpNo: k === '—' ? null : (list.find((r) => r.dpNo)?.dpNo ?? k), productName: latest?.productName ?? null, goodQty: qty, pricePerPcs: price, sales: salesValue(qty, price) };
+    const value = lines.some(x => x.valued) ? metric(sum(lines, x => x.sales)) : metric(null, 'Harga/PCS atau output tidak tersedia pada periode ini');
+    return { dpNo: k === '—' ? null : (list.find((r) => r.dpNo)?.dpNo ?? k), productName: latest?.productName ?? null, goodQty: qty, pricePerPcs: price, sales: value };
   }).sort((a, b) => (b.sales.value ?? -1) - (a.sales.value ?? -1) || b.goodQty - a.goodQty);
   return {
     range: { from: range.from, to: range.to, days: range.days },
@@ -355,14 +365,16 @@ export interface ScrapMaterial { name: string; pricePerGram: number | null }
 /** Per-material price above this (Rp/gram) is implausible for moulding resin and usually means the CSV price is per kg. */
 export const PRICE_PER_GRAM_SUSPECT = 10_000;
 
-export function buildScrap(records: SourceRecord[], parts: ReadonlyMap<string, ScrapPart>, materials: ReadonlyMap<string, ScrapMaterial>, range: Range): ScrapView {
+export function buildScrap(records: SourceRecord[], parts: ReadonlyMap<string, ScrapPart>, materials: ReadonlyMap<string, ScrapMaterial>, range: Range, history?: PriceLookup, mapping?: MaterialLookup): ScrapView {
   const rs = filterShift(records, range.shift);
   const line = (r: SourceRecord) => {
     const k = partKey(r.dpNo), part = k ? parts.get(k) ?? null : null;
-    const code = part?.materialCode ?? null, price = (code ? materials.get(code)?.pricePerGram : null) ?? null;
+    const code = mapping ? (k ? mapping(k,r.date) : null) : part?.materialCode ?? null;
+    const price = code ? (history ? history('material', code, r.date) : materials.get(code)?.pricePerGram ?? null) : null;
+    const pcsPrice = k ? (history ? history('part', k, r.date) : part?.pricePerPcs ?? null) : null;
     const gram = r.ngGram !== null && r.ngGram >= 0 ? r.ngGram : null;
-    const value = scrapValue(r.ngGram, price).value, sales = salesValue(r.actual, part?.pricePerPcs ?? null).value;
-    return { r, code, price, gram, value, sales, qty: r.actual !== null && r.actual > 0 ? r.actual : 0 };
+    const value = scrapValue(r.ngGram, price).value, sales = salesValue(r.actual, pcsPrice).value;
+    return { r, code, price, pcsPrice, gram, value, sales, qty: r.actual !== null && r.actual > 0 ? r.actual : 0 };
   };
   type L = ReturnType<typeof line>;
   const agg = (ls: L[]) => {
@@ -384,16 +396,18 @@ export function buildScrap(records: SourceRecord[], parts: ReadonlyMap<string, S
   const byDate = groupBy(rs, (r) => r.date), byMonthMap = groupBy(rs, (r) => r.date.slice(0, 7));
   const byMaterial: ScrapMaterialRow[] = [...groupBy(all, (l) => l.code).entries()].map(([code, ls]) => {
     const a = agg(ls), m = code ? materials.get(code) ?? null : null;
-    return { code, name: m?.name ?? null, pricePerGram: m?.pricePerGram ?? null, scrapGram: a.gram, scrapValue: a.haveValue ? metric(a.value) : noVal(a.haveGram) };
+    return { code, name: m?.name ?? null, pricePerGram: uniformPrice(ls.map(l => l.price)), scrapGram: a.gram, scrapValue: a.haveValue ? metric(a.value) : noVal(a.haveGram) };
   }).sort((x, y) => (y.scrapValue.value ?? -1) - (x.scrapValue.value ?? -1) || y.scrapGram - x.scrapGram);
   const byPart: ScrapPartRow[] = [...groupBy(all, (l) => partKey(l.r.dpNo) ?? '—').entries()].map(([k, ls]) => {
-    const a = agg(ls), part = k === '—' ? null : parts.get(k) ?? null, code = part?.materialCode ?? null, m = code ? materials.get(code) ?? null : null;
-    const goodQty = sum(ls, (l) => l.qty), pcs = part?.pricePerPcs ?? null;
+    const firstCode=ls[0]?.code ?? null, code=ls.every(l=>l.code===firstCode)?firstCode:null;
+    const a = agg(ls), m = code ? materials.get(code) ?? null : null;
+    const goodQty = sum(ls, (l) => l.qty), pcs = uniformPrice(ls.map(l => l.pcsPrice));
+    const valuedSales = ls.filter(l => l.sales !== null);
     return {
       dpNo: k === '—' ? null : (ls.find((l) => l.r.dpNo)?.r.dpNo ?? k), productName: [...ls].reverse().find((l) => l.r.productName)?.r.productName ?? null,
-      materialCode: code, materialName: m?.name ?? null, pricePerGram: m?.pricePerGram ?? null, pricePerPcs: pcs, goodQty,
+      materialCode: code, materialName: m?.name ?? null, pricePerGram: uniformPrice(ls.map(l => l.price)), pricePerPcs: pcs, goodQty,
       scrapGram: a.haveGram ? a.gram : null, scrapKg: a.haveGram ? scrapKg(a.gram) : metric(null, 'NG (gram) belum tersedia dari ConMas'),
-      scrapValue: a.haveValue ? metric(a.value) : noVal(a.haveGram), sales: salesValue(goodQty, pcs), ratio: ratioOf(a),
+      scrapValue: a.haveValue ? metric(a.value) : noVal(a.haveGram), sales: valuedSales.length ? metric(sum(valuedSales, l => l.sales!)) : metric(null, 'Harga/PCS atau output tidak tersedia pada periode ini'), ratio: ratioOf(a),
     };
   }).sort((x, y) => (y.scrapValue.value ?? -1) - (x.scrapValue.value ?? -1) || (y.scrapGram ?? -1) - (x.scrapGram ?? -1));
   return {

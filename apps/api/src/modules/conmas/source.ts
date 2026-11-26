@@ -3,6 +3,7 @@ import type pg from 'pg';
 import { MACHINE_PERSONNEL_ROLES, type MachineMaster, type MachinePersonnelRole } from '@mpd/contracts';
 import type { Logger } from '../../logger.js';
 import { HEADER_COLUMNS, HOUR_BLOCKS } from './fieldMap.generated.js';
+import type { ReviewGroup } from './recordPolicy.js';
 
 /* Anti-corruption layer (ADR-021): ConMas view -> SELECT-only role -> this adapter -> Zod-validated SourceRecord.
  * Physical cluster_* names stay here. Field meanings are PROPOSED (STATE §10) until confirmed by the owner. */
@@ -36,7 +37,7 @@ export interface SourceRecord {
   updatedAt: string | null;
   slots: SourceSlot[];
 }
-export interface SourceResult { records: SourceRecord[]; invalidRows: number; duplicatesDropped: number }
+export interface SourceResult { records: SourceRecord[]; invalidRows: number; duplicatesDropped: number; ambiguousGroups?: number; approvedGroups?: number; reviewGroups?: ReviewGroup[] }
 
 export class SourceUnavailable extends Error {
   constructor(public readonly code: string, message: string) {
@@ -71,7 +72,7 @@ export interface ConmasConfig {
 
 // ---------- row validation & normalisation (pure, unit-tested) ----------
 const num = z.union([z.number(), z.string(), z.null(), z.undefined()]).transform((v, ctx) => {
-  if (v === null || v === undefined || v === '') return null;
+  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return null;
   const n = typeof v === 'number' ? v : Number(String(v).trim());
   if (!Number.isFinite(n)) {
     ctx.addIssue({ code: 'custom', message: 'bukan angka' });
@@ -107,7 +108,8 @@ export function parseHourLabel(label: string | null): number | null {
 export function parseRate(raw: unknown, scale: 'percent' | 'fraction'): number | null {
   const r = num.safeParse(raw);
   if (!r.success || r.data === null) return null;
-  return scale === 'fraction' ? r.data * 100 : r.data;
+  const value = scale === 'fraction' ? r.data * 100 : r.data;
+  return value >= 0 && value <= 100 ? value : null;
 }
 
 export function normalizeRow(row: Record<string, unknown>, cfg: ConmasConfig): SourceRecord | null {
@@ -164,14 +166,21 @@ export function normalizeRow(row: Record<string, unknown>, cfg: ConmasConfig): S
 }
 
 /** Q-019 (owner: "pakai yang terbaru"): per machine+date+shift keep highest rev_no; tie -> latest update; deleted rows excluded before. */
-export function selectLatest(rows: { rec: SourceRecord; rev: number }[]): { records: SourceRecord[]; dropped: number } {
+export function selectLatest(rows: { rec: SourceRecord; rev: number }[]): { records: SourceRecord[]; dropped: number; ambiguousGroups: number } {
   const best = new Map<string, { rec: SourceRecord; rev: number }>();
+  const ambiguous = new Set<string>();
+  const time = (r: SourceRecord) => { const t = Date.parse(r.updatedAt ?? ''); return Number.isFinite(t) ? t : -Infinity; };
+  const differs = (a: string | null, b: string | null) => !!a?.trim() && !!b?.trim() && a.trim().toUpperCase() !== b.trim().toUpperCase();
   for (const r of rows) {
-    const k = `${r.rec.date}|${r.rec.machineNo}|${r.rec.shift}`;
+    const k = JSON.stringify([r.rec.date, r.rec.machineNo, r.rec.shift]);
     const cur = best.get(k);
-    if (!cur || r.rev > cur.rev || (r.rev === cur.rev && (r.rec.updatedAt ?? '') > (cur.rec.updatedAt ?? ''))) best.set(k, r);
+    if (!cur) { best.set(k, r); continue; }
+    const tied = r.rev === cur.rev && time(r.rec) === time(cur.rec);
+    if (differs(r.rec.dpNo, cur.rec.dpNo) || differs(r.rec.poNo, cur.rec.poNo) || (tied && r.rec.recordId !== cur.rec.recordId)) ambiguous.add(k);
+    // Preserve Q-019 (highest revision, then latest update). Deterministic ID tie-break only when both are equal.
+    if (r.rev > cur.rev || (r.rev === cur.rev && (time(r.rec) > time(cur.rec) || (tied && r.rec.recordId > cur.rec.recordId)))) best.set(k, r);
   }
-  return { records: [...best.values()].map((x) => x.rec), dropped: rows.length - best.size };
+  return { records: [...best.values()].map((x) => x.rec), dropped: rows.length - best.size, ambiguousGroups: ambiguous.size };
 }
 
 const quote = (id: string) => `"${id.replace(/"/g, '""')}"`;
@@ -182,21 +191,26 @@ export const machineSort = (a: string, b: string) => {
   return Number.isFinite(na) && Number.isFinite(nb) ? na - nb : a.localeCompare(b);
 };
 
-export function createConmasSource(pool: pg.Pool, cfg: ConmasConfig, log: Logger): ConmasSource {
+export function createConmasSource(pool: pg.Pool, cfg: ConmasConfig, log: Logger, registry?: pg.Pool): ConmasSource {
   const cache = new Map<string, { at: number; value: SourceResult }>();
   const inFlight = new Map<string, Promise<SourceResult>>();
   let schemaCheck: { at: number; missing: string[] } | null = null;
   /** Rate columns that are configured AND present in the view; the rest are silently skipped (shown as "—" with a reason). */
   let activeRates: RateColumns = NO_RATE_COLUMNS;
   let activeNames: ConmasConfig['personnelNames'] = {};
+  let availableColumns = new Set<string>();
   const sysCols = Object.entries(cfg.cols).filter(([, v]) => !v).map(([k]) => k);
 
   async function missingColumns(): Promise<string[]> {
     if (schemaCheck && Date.now() - schemaCheck.at < 10 * 60_000) return schemaCheck.missing;
-    const r = await pool.query<{ column_name: string }>('SELECT column_name FROM information_schema.columns WHERE table_name = $1', [cfg.view]);
+    const r = await pool.query<{ column_name: string }>('SELECT attname AS column_name FROM pg_attribute WHERE attrelid = to_regclass($1) AND attnum > 0 AND NOT attisdropped', [quote(cfg.view)]);
     const have = new Set(r.rows.map((x) => x.column_name));
-    const wanted = [...ALL_DATA_COLUMNS, ...Object.values(cfg.cols).filter((x): x is string => !!x)];
-    const missing = have.size === 0 ? ['<view tidak ditemukan atau tidak ada hak SELECT>'] : wanted.filter((c) => !have.has(c));
+    availableColumns = have;
+    // Only identity, revision and core output fields are mandatory. Optional columns remain null.
+    const wanted = [HEADER_COLUMNS.productionDate, HEADER_COLUMNS.machineNo, HEADER_COLUMNS.shift, HEADER_COLUMNS.outputPlan, HEADER_COLUMNS.outputActual, ...Object.values(cfg.cols).filter((x): x is string => !!x)];
+    const missing = have.size === 0 ? ['<view tidak ditemukan>'] : wanted.filter((c) => !have.has(c));
+    const optionalMissing = ALL_DATA_COLUMNS.filter(c => !have.has(c) && !wanted.includes(c));
+    if (optionalMissing.length) log.warn({ count: optionalMissing.length, columns: optionalMissing.slice(0, 20) }, 'Optional ConMas columns missing');
     schemaCheck = { at: Date.now(), missing };
     const want = cfg.rates ?? NO_RATE_COLUMNS;
     const pick = (c: string | null) => (c && have.has(c) ? c : null);
@@ -224,7 +238,7 @@ export function createConmasSource(pool: pg.Pool, cfg: ConmasConfig, log: Logger
     const names = machineNo ? activeNames : undefined;
     const { oee, availability, performance } = activeRates;
     const optionalColumns = [oee, availability, performance, ...MACHINE_PERSONNEL_ROLES.map((role) => names?.[role])].filter((x): x is string => !!x);
-    const cols = [...new Set([...ALL_DATA_COLUMNS, c.recordId, c.revNo, c.deleted, c.updatedAt, ...optionalColumns])].map(quote).join(', ');
+    const cols = [...new Set([...ALL_DATA_COLUMNS.filter(col => availableColumns.has(col)), c.recordId, c.revNo, c.deleted, c.updatedAt, ...optionalColumns])].map(quote).join(', ');
     const values: unknown[] = [from, to];
     let sql = `SELECT ${cols} FROM ${quote(cfg.view)} WHERE ${quote(HEADER_COLUMNS.productionDate)} >= $1::date AND ${quote(HEADER_COLUMNS.productionDate)} < ($2::date + 1)`;
     if (machineNo) {
@@ -252,8 +266,11 @@ export function createConmasSource(pool: pg.Pool, cfg: ConmasConfig, log: Logger
       }
       kept.push({ rec, rev });
     }
-    const sel = selectLatest(kept);
-    return { records: sel.records, invalidRows: invalid, duplicatesDropped: sel.dropped };
+    const { applyRecordPolicies, loadRecordPolicies } = await import('./recordPolicy.js');
+    const policies = registry ? await loadRecordPolicies(registry, from, to, machineNo) : [];
+    const sel = applyRecordPolicies(kept, policies, selectLatest);
+    if (invalid || sel.dropped) log.warn({ invalid, duplicatesDropped: sel.dropped, ambiguousGroups: sel.ambiguousGroups, from, to }, 'ConMas data quality');
+    return { records: sel.records, invalidRows: invalid, duplicatesDropped: sel.dropped, ambiguousGroups: sel.ambiguousGroups, approvedGroups: sel.approvedGroups, reviewGroups: sel.reviewGroups };
   }
 
   const records = async (from: string, to: string, machineNo?: string): Promise<SourceResult> => {
@@ -291,13 +308,29 @@ export function createConmasSource(pool: pg.Pool, cfg: ConmasConfig, log: Logger
       }
     },
     async machines() {
-      const to = new Date().toISOString().slice(0, 10);
-      const from = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
-      const { records: rs } = await records(from, to);
+      const offsetMinutes = (cfg.tzOffset.startsWith('-') ? -1 : 1) * (Number(cfg.tzOffset.slice(1, 3)) * 60 + Number(cfg.tzOffset.slice(4, 6)));
+      const localNow = Date.now() + offsetMinutes * 60_000;
+      const to = new Date(localNow).toISOString().slice(0, 10);
+      const from = new Date(localNow - 30 * 864e5).toISOString().slice(0, 10);
+      let rs: SourceRecord[];
+      try { rs = (await records(from, to)).records; } catch (error) {
+        if (!registry || !(error instanceof SourceUnavailable)) throw error;
+        rs = [];
+      }
       const latest = new Map<string, SourceRecord>();
       for (const r of rs) {
         const cur = latest.get(r.machineNo);
-        if (!cur || r.date > cur.date) latest.set(r.machineNo, r);
+        if (!cur || r.date > cur.date || (r.date === cur.date && r.shift > cur.shift)) latest.set(r.machineNo, r);
+      }
+      if (registry) {
+        if (latest.size) await registry.query(`INSERT INTO md_machine_registry(machine_no, dp_no, product_name, cavity, last_seen)
+          SELECT machine_no, dp_no, product_name, cavity, last_seen FROM jsonb_to_recordset($1::jsonb)
+          AS x(machine_no text, dp_no text, product_name text, cavity text, last_seen date)
+          ON CONFLICT (machine_no) DO UPDATE SET dp_no=EXCLUDED.dp_no, product_name=EXCLUDED.product_name, cavity=EXCLUDED.cavity, last_seen=EXCLUDED.last_seen
+          WHERE md_machine_registry.last_seen <= EXCLUDED.last_seen AND (md_machine_registry.dp_no, md_machine_registry.product_name, md_machine_registry.cavity, md_machine_registry.last_seen) IS DISTINCT FROM (EXCLUDED.dp_no, EXCLUDED.product_name, EXCLUDED.cavity, EXCLUDED.last_seen)`,
+          [JSON.stringify([...latest.values()].map(r => ({machine_no:r.machineNo, dp_no:r.dpNo, product_name:r.productName, cavity:r.cavity, last_seen:r.date})))]);
+        const saved = await registry.query<{ machine_no: string; dp_no: string | null; product_name: string | null; cavity: string | null; last_seen: string }>('SELECT machine_no, dp_no, product_name, cavity, last_seen::text FROM md_machine_registry');
+        return saved.rows.map(r => ({machineNo:r.machine_no, dpNo:r.dp_no, productName:r.product_name, cavity:r.cavity, lastSeen:r.last_seen})).sort((a,b) => machineSort(a.machineNo,b.machineNo));
       }
       return [...latest.values()]
         .sort((a, b) => machineSort(a.machineNo, b.machineNo))

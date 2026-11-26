@@ -78,6 +78,12 @@ export function StopTimePage() {
             </>
           )}
         </div>
+        <div className="card stop-filter-controls" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', padding: 12 }}>
+          <label>Loss group <select aria-label="Loss group" value={group} onChange={(e) => { setGroup(e.target.value as LossGroup | ''); setCat(''); }}><option value="">All groups</option>{(v?.groups ?? []).filter(g => g.id !== 'unmapped').map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></label>
+          <label>Category <select aria-label="Category" value={cat} onChange={(e) => setCat(e.target.value)}><option value="">All categories</option>{(v?.categories ?? []).filter(c => !group || c.group === group).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+          <label><input type="checkbox" checked={info} onChange={(e) => setInfo(e.target.checked)} /> Include info-only</label>
+          <button className="btn" type="button" onClick={() => { setGroup(''); setCat(''); setInfo(s.disp.info); }}>Reset filters</button>
+        </div>
         <Tabs value={tab} onChange={setTab} items={[{ id: 'stop-0', label: 'Overview' }, { id: 'stop-1', label: 'By machine' }, { id: 'stop-2', label: 'By product' }, { id: 'stop-3', label: 'Top details' }, { id: 'stop-4', label: 'Ranking & shift' }]}
           right={<div className="legend">{(v?.groups ?? []).filter((g) => g.id !== 'unmapped').map((g) => <span key={g.id}><i style={{ background: tokenColor(g.color) }} />{g.name}</span>)}</div>} />
         {tab === 'stop-0' && (

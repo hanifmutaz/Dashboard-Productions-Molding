@@ -120,8 +120,9 @@ export function MachineDashboard(p: Props) {
 
   const blocked = q.isPending || env?.state === 'unavailable' || q.isError;
   const source = q.isPending ? 'loading' : blocked ? 'down' : env?.freshness === 'stale' ? 'stale' : x && !x.hasRecord ? 'empty' : 'ok';
+  const tooOld = env?.notices.some(n => n.code === 'TOO_OLD' || n.code === 'PERSISTENT_SNAPSHOT') ?? false;
   const sourceLabel = source === 'loading' ? 'Memuat data…' : q.isError ? 'Gagal memuat data' : source === 'down' ? 'Sumber tidak tersedia'
-    : source === 'stale' ? 'Data tertunda' : source === 'empty' ? 'Tidak ada data' : env?.freshness === 'current' ? 'Data tersedia' : 'Histori';
+    : source === 'stale' ? (tooOld ? 'Bukan real-time' : 'Data tertunda') : source === 'empty' ? 'Tidak ada data' : env?.freshness === 'current' ? 'Data tersedia' : 'Histori';
   const sourceTime = env?.sourceUpdatedAt ? `Update ${timeAgo(env.sourceUpdatedAt)}` : null;
   const dt = x ? new Date(x.date + 'T00:00:00') : null;
   const partCode = (label: 'DP' | 'PO', value: string | null) =>
@@ -218,7 +219,7 @@ export function MachineDashboard(p: Props) {
                     <button className="day-btn" type="button" aria-label="Hari berikutnya" disabled={!x?.nextDate} onClick={() => x?.nextDate && p.onDate(x.nextDate)}>›</button>
                   </div>
                 </div>
-                <div className="source" role="status" aria-live="polite" aria-atomic="true">
+                <div className="source" role="status" aria-live="polite" aria-atomic="true" title={env?.notices.map(n => n.message).join(' ')}>
                   <span>{sourceLabel}</span>
                   {sourceTime && source !== 'empty' && <small>{sourceTime}</small>}
                 </div>

@@ -5,6 +5,7 @@ import { useSession } from './lib/session';
 import { FilterProvider } from './lib/filters';
 import { AppShell, PAGES } from './shell/AppShell';
 import { ErrorPanel, ForbiddenPage, LoginPage, NotFoundPage } from './pages/Auth';
+import './styles/operations-responsive.css';
 
 /* Pages are loaded per route so the first screen (and the floor iPads) only download what they show. */
 const ProductionPage = lazy(() => import('./pages/Production').then((m) => ({ default: m.ProductionPage })));
@@ -18,6 +19,8 @@ const MachineDetailPage = lazy(() => import('./pages/Machines').then((m) => ({ d
 const MasterDataPage = lazy(() => import('./pages/MasterData').then((m) => ({ default: m.MasterDataPage })));
 const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })));
 const SystemStatusPage = lazy(() => import('./pages/SystemStatus').then((m) => ({ default: m.SystemStatusPage })));
+const OperationsPage = lazy(() => import('./pages/Operations').then(m => ({default:m.OperationsPage})));
+const ExportPage = lazy(() => import('./pages/Operations').then(m => ({default:m.ExportPage})));
 const ProfilePage = lazy(() => import('./pages/Profile').then((m) => ({ default: m.ProfilePage })));
 const UsersPage = lazy(() => import('./pages/Admin').then((m) => ({ default: m.UsersPage })));
 const KiosksPage = lazy(() => import('./pages/Admin').then((m) => ({ default: m.KiosksPage })));
@@ -88,6 +91,8 @@ const router = createBrowserRouter([
           { path: 'machines', element: g('detail', <MachineListPage />) },
           { path: 'machines/:machineNo', element: g('detail', <MachineDetailPage />) },
           { path: 'master-data', element: g('master', <MasterDataPage />) },
+          { path: 'operations', element: g('operations', <OperationsPage />) },
+          { path: 'export-data', element: g('export', <ExportPage />) },
           { path: 'settings', element: g('settings', <SettingsPage />) },
           { path: 'admin/users', element: g('users', <UsersPage />) },
           { path: 'admin/kiosks', element: g('kiosks', <KiosksPage />) },

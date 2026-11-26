@@ -289,3 +289,19 @@ select { max-width: 100%; padding: 5px 8px; }
   :host(.ipad) .p1 .stop-content { padding-block: 8px; }
   :host(.ipad) .longest-stop { padding-block: 7px; }
 }
+
+/* Kiosk: keep viewport bounded, but scroll content rather than clipping it. */
+:host(.ipad) .app { height: 100%; min-width: 0; }
+:host(.ipad) .stage { min-width: 0; overscroll-behavior: contain; }
+:host(.ipad) .frame { max-width: 100%; }
+:host(.ipad) :is(.machine-part,.output-content,.output-summary,.figs,.pic,.pt) { min-width: 0; }
+:host(.ipad) .top-tools { flex-wrap: wrap; }
+:host(.ipad) .figs dd { overflow-wrap: anywhere; }
+@media (max-height: 700px) and (orientation: landscape) {
+  :host(.ipad) { --frame-gutter: 20px; --gap: 10px; }
+  :host(.ipad) .workspace { padding-block: 8px; }
+  :host(.ipad) .card-head { padding-block: 7px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}

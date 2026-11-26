@@ -42,7 +42,7 @@ describe('Machine Detail personnel', () => {
     const pool = {
       query: (sql: string) => {
         queries.push(sql);
-        if (sql.includes('information_schema')) return Promise.resolve({ rows: available.map((column_name) => ({ column_name })) });
+        if (sql.includes('FROM pg_attribute')) return Promise.resolve({ rows: available.map((column_name) => ({ column_name })) });
         return Promise.resolve({ rowCount: 1, rows: [row] });
       },
     } as unknown as pg.Pool;

@@ -21,6 +21,8 @@ export const PAGES: PageMeta[] = [
   { path: '/need-part', key: 'needpart', title: 'Need Part', sub: 'Segera Hadir', group: 'Monitoring' },
   { path: '/machines', key: 'detail', title: 'Machine Detail', sub: 'Every machine has its own dashboard · pick a machine to open it', group: 'Analysis', perm: PERMISSIONS.viewMachineDetail },
   { path: '/master-data', key: 'master', title: 'Master Data', sub: 'Parts, materials, prices (Rupiah), stop categories and machines used by every page', group: 'Data & system', perm: PERMISSIONS.viewMasterData },
+  { path: '/operations', key: 'operations', title: 'Operations Master', sub: 'Machine registry, price history and working calendar', group: 'Data & system', perm: PERMISSIONS.viewMasterData },
+  { path: '/export-data', key: 'export', title: 'Export Data', sub: 'Production report builder and data quality', group: 'Data & system', perm: PERMISSIONS.exportProduction },
   { path: '/settings', key: 'settings', title: 'Settings', sub: 'Plant-wide rules: targets, status colours, calendar, stop-time display, kiosk and data freshness', group: 'Data & system', perm: PERMISSIONS.viewSettings },
   { path: '/admin/users', key: 'users', title: 'Users & Roles', sub: 'Accounts, roles and permissions · authorization is enforced by the server', group: 'Data & system', perm: PERMISSIONS.manageUsers },
   { path: '/admin/kiosks', key: 'kiosks', title: 'Kiosks', sub: 'Pair floor iPads to one machine · revoke at any time', group: 'Data & system', perm: PERMISSIONS.manageKiosks },

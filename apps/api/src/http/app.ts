@@ -11,6 +11,9 @@ import { kioskRoutes } from '../modules/kiosk/routes.js';
 import { masterDataRoutes } from '../modules/masterdata/routes.js';
 import { metricsRoutes, type MetricsCache } from '../modules/metrics/routes.js';
 import { settingsRoutes } from '../modules/settings/routes.js';
+import { operationsRoutes } from '../modules/operations/routes.js';
+import { createSystemMonitor } from '../modules/health/systemMonitor.js';
+import type pg from 'pg';
 import { notFound } from './errors.js';
 import { auditor, authenticate, cookies, csrf, errorHandler, requestId, securityHeaders } from './middleware.js';
 
@@ -28,6 +31,7 @@ export interface AppDeps {
   webDist?: string;
   employeePhotoDir?: string;
   requiredMigrations?: string[];
+  operationsPool?: pg.Pool;
 }
 
 export function createApp(d: AppDeps): Express {
@@ -35,6 +39,8 @@ export function createApp(d: AppDeps): Express {
   app.disable('x-powered-by');
   app.set('trust proxy', d.trustProxy);
   app.use(requestId, securityHeaders, cookies);
+  const systemMonitor = createSystemMonitor(d.operationsPool);
+  app.use(systemMonitor.observe);
   app.use((req, res, next) => {
     const t0 = process.hrtime.bigint();
     res.on('finish', () => {
@@ -76,7 +82,9 @@ export function createApp(d: AppDeps): Express {
   api.use(masterDataRoutes(d.repos, d.conmas, audit, invalidate));
   api.use(adminRoutes(d.repos, audit));
   api.use(kioskRoutes(d.repos, audit, d.cookieSecure));
-  api.use(metricsRoutes(d.repos, d.conmas, cache, d.tzOffsetMinutes, d.employeePhotoDir));
+  api.use(metricsRoutes(d.repos, d.conmas, cache, d.tzOffsetMinutes, d.employeePhotoDir, d.operationsPool));
+  if (d.operationsPool) api.use(operationsRoutes(d.operationsPool, d.conmas, audit, d.repos));
+  api.use(systemMonitor.routes);
   api.use(() => {
     throw notFound('Endpoint');
   });
