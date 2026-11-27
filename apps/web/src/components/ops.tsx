@@ -1,6 +1,10 @@
-import { useId, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { ApiFailure } from '../lib/api';
 import { DataTable, type Col } from './table';
+import { PeriodPicker, type PeriodValue } from '../shell/PeriodFilter';
+import { useFilters } from '../lib/filters';
+import { useSession } from '../lib/session';
+import { shiftLabel } from '../lib/period';
 import '../styles/ops.css';
 
 /* Shared building blocks for Operations Master, Export Data and report builders (one look, one behaviour). */
@@ -103,6 +107,27 @@ export function ColumnPicker({ all, value, onChange, label = (k: string) => huma
           ))}
         </ol>
       </>}
+    </div>
+  );
+}
+
+export type { PeriodValue };
+
+/** Report period state, starting from the same period as the monitoring pages. */
+export function useOpsRange() {
+  const { f } = useFilters();
+  return useState<PeriodValue>(() => ({ from: f.from, to: f.to, preset: f.preset, shift: f.shift, status: '' }));
+}
+
+/** Period field: the same popover picker as Production / Stop Time (presets, calendar, shift). */
+export function RangeField({ label = 'Period', value, onChange, shift = true, wide = true }: { label?: ReactNode; value: PeriodValue; onChange: (v: PeriodValue) => void; shift?: boolean; wide?: boolean }) {
+  const { today } = useFilters();
+  const { settings } = useSession();
+  const shifts = [1, 2, 3].map((n) => ({ value: String(n) as PeriodValue['shift'], label: shiftLabel(settings.shifts, n) }));
+  return (
+    <div className={wide ? 'fld wide ops-range' : 'fld ops-range'}>
+      <span className="lb">{label}</span>
+      <PeriodPicker value={value} onApply={onChange} today={today} shifts={shifts} showShift={shift} />
     </div>
   );
 }

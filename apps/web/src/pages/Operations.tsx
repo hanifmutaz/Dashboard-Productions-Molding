@@ -7,7 +7,7 @@ import { downloadCsv } from '../components/table';
 import { downloadXlsx } from '../lib/xlsx';
 import { Kpi } from '../components/kpi';
 import { Seg, useToast } from '../components/ui';
-import { ColumnPicker, ErrorBanner, Field, Grid, Stats, dayChip, fmtDate, fmtDateTime, fmtNum, text, yesNo, type GridCol, type Row } from '../components/ops';
+import { ColumnPicker, ErrorBanner, Field, Grid, RangeField, Stats, useOpsRange, dayChip, fmtDate, fmtDateTime, fmtNum, text, yesNo, type GridCol, type Row } from '../components/ops';
 import { CompletionMaster, StopReportBuilder, QualityHistory, RecordReview } from './OperationsCompletion';
 
 type MasterTab = 'machines' | 'prices' | 'calendar';
@@ -114,7 +114,7 @@ type Quality = { records: number; invalid: number; duplicates: number; missingOu
 export function ExportPage() {
   const { can } = useSession();
   const toast = useToast();
-  const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [shift, setShift] = useState(''); const [machine, setMachine] = useState(''); const [product, setProduct] = useState('');
+  const [period, setPeriod] = useOpsRange(); const { from, to, shift } = period; const [machine, setMachine] = useState(''); const [product, setProduct] = useState('');
   const [cols, setCols] = useState(STANDARD); const [name, setName] = useState('');
   const [report, setReport] = useState<Report | null>(null); const [quality, setQuality] = useState<Quality | null>(null);
   const [error, setError] = useState<unknown>(null); const [busy, setBusy] = useState(false);
@@ -153,9 +153,7 @@ export function ExportPage() {
           <div className="ops-sec">
             <div className="ops-h">Filters</div>
             <div className="ops-form">
-              <Field label="From">{(id) => <input id={id} type="date" value={from} max={to || undefined} onChange={(e) => { setFrom(e.target.value); reset(); }} />}</Field>
-              <Field label="To">{(id) => <input id={id} type="date" value={to} min={from || undefined} onChange={(e) => { setTo(e.target.value); reset(); }} />}</Field>
-              <Field label="Shift">{(id) => <select id={id} value={shift} onChange={(e) => { setShift(e.target.value); reset(); }}><option value="">All shifts</option>{['1', '2', '3'].map((s) => <option key={s} value={s}>Shift {s}</option>)}</select>}</Field>
+              <RangeField label="Period & shift" value={period} onChange={(v) => { setPeriod(v); reset(); }} />
               <Field label="Machine">{(id) => <input id={id} placeholder="All machines" value={machine} onChange={(e) => { setMachine(e.target.value); reset(); }} />}</Field>
               <Field label="Product / DP No">{(id) => <input id={id} placeholder="All products" value={product} onChange={(e) => { setProduct(e.target.value); reset(); }} />}</Field>
             </div>

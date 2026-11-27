@@ -6,7 +6,7 @@ import { useSession } from '../lib/session';
 import { downloadCsv } from '../components/table';
 import { downloadXlsx } from '../lib/xlsx';
 import { Seg, useToast } from '../components/ui';
-import { ColumnPicker, ErrorBanner, Field, Grid, Stats, Toggle, dayChip, fmtDate, fmtDateTime, fmtNum, text, type Cell, type GridCol, type Row } from '../components/ops';
+import { ColumnPicker, ErrorBanner, Field, Grid, RangeField, Stats, Toggle, useOpsRange, dayChip, fmtDate, fmtDateTime, fmtNum, text, type Cell, type GridCol, type Row } from '../components/ops';
 
 const SHIFTS = ['1', '2', '3'];
 const DAY_TYPES = ['working', 'holiday', 'overtime'];
@@ -106,7 +106,7 @@ export function StopReportBuilder() {
   const { can } = useSession();
   const toast = useToast();
   const allowed = can(PERMISSIONS.viewStopTime) && can(PERMISSIONS.exportProduction);
-  const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [shift, setShift] = useState(''); const [machine, setMachine] = useState(''); const [product, setProduct] = useState('');
+  const [period, setPeriod] = useOpsRange(); const { from, to, shift } = period; const [machine, setMachine] = useState(''); const [product, setProduct] = useState('');
   const [category, setCategory] = useState(''); const [detail, setDetail] = useState(''); const [min, setMin] = useState('0'); const [info, setInfo] = useState(false);
   const [cols, setCols] = useState(STOP_FIELDS); const [result, setResult] = useState<StopReport | null>(null);
   const [error, setError] = useState<unknown>(null); const [busy, setBusy] = useState(false);
@@ -133,9 +133,7 @@ export function StopReportBuilder() {
         <div className="ops-sec">
           <div className="ops-h">Filters</div>
           <div className="ops-form">
-            <Field label="From">{(id) => <input id={id} type="date" value={from} max={to || undefined} onChange={upd(setFrom)} />}</Field>
-            <Field label="To">{(id) => <input id={id} type="date" value={to} min={from || undefined} onChange={upd(setTo)} />}</Field>
-            <Field label="Shift">{(id) => <select id={id} value={shift} onChange={upd(setShift)}><option value="">All shifts</option>{SHIFTS.map((s) => <option key={s} value={s}>Shift {s}</option>)}</select>}</Field>
+            <RangeField label="Period & shift" value={period} onChange={(v) => { setPeriod(v); reset(); }} />
             <Field label="Machine">{(id) => <input id={id} placeholder="All machines" maxLength={20} value={machine} onChange={upd(setMachine)} />}</Field>
             <Field label="Product / DP No">{(id) => <input id={id} placeholder="All products" maxLength={100} value={product} onChange={upd(setProduct)} />}</Field>
             <Field label="Category">{(id) => <input id={id} placeholder="All categories" maxLength={100} value={category} onChange={upd(setCategory)} />}</Field>
@@ -156,7 +154,7 @@ export function StopReportBuilder() {
           </div>
         )}
         <div className="ops-actions">
-          <span className="hint">{disabledReason ?? `${cols.length} columns · ${fmtDate(from)} – ${fmtDate(to)}${info ? ' · incl. info-only' : ''}`}</span>
+          <span className="hint">{disabledReason ?? `${cols.length} columns · ${fmtDate(from)} – ${fmtDate(to)}${shift ? ` · shift ${shift}` : ''}${info ? ' · incl. info-only' : ''}`}</span>
           <div className="grp">
             <button className="btn" type="button" disabled={busy || !!disabledReason} onClick={() => void run('preview')}>{busy ? 'Working…' : 'Preview'}</button>
             <button className="btn pri" type="button" disabled={busy || !!disabledReason} onClick={() => void run('csv')}>Export CSV</button>
@@ -177,7 +175,7 @@ export function QualityHistory() {
   const toast = useToast();
   const allowed = can(PERMISSIONS.viewProduction); const edit = can(PERMISSIONS.editMasterData);
   const q = useQuery({ queryKey: ['quality-history'], queryFn: () => api.get<Row[]>('/api/operations/quality-history'), enabled: allowed });
-  const [from, setFrom] = useState(''); const [to, setTo] = useState('');
+  const [period, setPeriod] = useOpsRange(); const { from, to } = period; const [onlyThis, setOnlyThis] = useState(false);
   const [review, setReview] = useState<{ row: Snapshot; status: string; note: string } | null>(null);
   const [error, setError] = useState<unknown>(null); const [busy, setBusy] = useState(false);
   async function capture() {
@@ -191,20 +189,19 @@ export function QualityHistory() {
   }
   if (!allowed) return null;
   const history = (q.data ?? []).map((r) => { const { metrics, ...meta } = r; return { ...meta, ...(typeof metrics === 'object' && metrics !== null ? metrics : {}) } as Snapshot; });
-  const scoped = from && to ? history.filter((r) => r.date_from === from && r.date_to === to) : history;
+  const scoped = onlyThis ? history.filter((r) => r.date_from === from && r.date_to === to) : history;
   const warnNum = (k: string) => (r: Row) => { const n = Number(r[k] ?? 0); return n > 0 ? <b style={{ color: 'var(--warn)' }}>{fmtNum(n, 0)}</b> : fmtNum(n, 0); };
   return (
     <section className="card">
       <div className="ch"><div><h3>Data quality history &amp; review</h3><p>Manual snapshots of ConMas data quality per period · reviewing never changes ConMas data</p></div></div>
       <div className="cb">
         <form className="ops-edit" onSubmit={(e) => { e.preventDefault(); void capture(); }}>
-          <div className="ops-h"><span>Capture a snapshot</span><span className="fa">Picking a range also filters the history below</span></div>
+          <div className="ops-h"><span>Capture a snapshot</span><span className="fa">Snapshots cover whole days (all shifts)</span></div>
           <div className="ops-form">
-            <Field label="From">{(id) => <input id={id} type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />}</Field>
-            <Field label="To">{(id) => <input id={id} type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />}</Field>
-            <div className="act">
+            <RangeField value={period} onChange={setPeriod} shift={false} />
+            <div className="act wide">
               <button className="btn pri" disabled={busy || !from || !to || from > to}>{busy && !review ? 'Capturing…' : 'Capture quality'}</button>
-              {(from || to) && <button className="btn" type="button" onClick={() => { setFrom(''); setTo(''); }}>Show all</button>}
+              <span className="chks"><Toggle checked={onlyThis} onChange={setOnlyThis}>Only this period in history</Toggle></span>
             </div>
           </div>
         </form>

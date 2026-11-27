@@ -15,6 +15,11 @@
   background-repeat:no-repeat;background-position:right var(--s-size-10) center;background-size:var(--s-size-16)}
 .fld input:disabled,.fld select:disabled{background:var(--surface-3);color:var(--faint);cursor:not-allowed}
 
+/* Period picker inside a form: full-width trigger, same look as the monitoring filter bar. */
+.ops-range .period-filter{width:100%}
+.ops-range .pbtn{width:100%;height:var(--s-size-34);display:flex;align-items:center;justify-content:space-between;gap:var(--s-size-8);text-align:left}
+.ops-range .pbtn>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* Edit panel: visually separates "change something" from the table it changes. */
 .ops-edit{background:var(--surface-2);border:var(--s-size-1) solid var(--line);border-radius:var(--r);padding:var(--s-size-12) var(--s-size-14) var(--s-size-14);margin-bottom:var(--s-size-12)}
 .ops-h{display:flex;align-items:center;justify-content:space-between;gap:var(--s-size-8);flex-wrap:wrap;font-size:var(--s-size-12);letter-spacing:.04em;text-transform:uppercase;font-weight:var(--c-font-weight-600);color:var(--muted);margin:0 0 var(--s-size-10)}
