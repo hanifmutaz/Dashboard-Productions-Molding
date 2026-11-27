@@ -126,3 +126,6 @@ body:not(.md-on) .app svg.ch2 .hit:hover{rx:8}
 body:not(.md-on) .app :is(.br .bt,.mini .mt,.rw .bar){border-radius:999px}
 body:not(.md-on) .app :is(.br .bt,.mini .mt,.rw .bar)>i:only-child{border-radius:999px}
 body:not(.md-on) .app .gbar{border-radius:999px}
+
+/* Sidebar rail: group titles are hidden (only a thin divider stays) */
+body.rail .app .sidebar .ngrp{font-size:0;letter-spacing:0;line-height:0;overflow:hidden;color:transparent}
