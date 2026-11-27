@@ -146,7 +146,7 @@ button.pct.lk{border:0;font:inherit}
 .pcmp-wrap th.pcmp-kpi { vertical-align: bottom; font-size: var(--s-size-12); text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .pcmp-split { border-left: var(--s-size-1) solid var(--line-2); }
 .pcmp-wrap tbody tr:nth-child(even) td { background: var(--surface-2); }
-.pcmp-wrap tbody tr:hover td { background: var(--primary-soft); }
-.pcmp-wrap th.cur, .pcmp-wrap td.cur { background: var(--primary-soft); }
+.pcmp-wrap thead th.cur, .pcmp-wrap tbody tr td.cur { background: var(--primary-soft); }
+.pcmp-wrap tbody tr:hover td, .pcmp-wrap tbody tr:hover td.cur { background: var(--surface-3); }
 .pcmp-wrap td.pcmp-cell { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: var(--s-size-13); font-weight: var(--c-font-weight-600); }
 .pcmp-skel { display: inline-block; width: var(--s-size-48); height: var(--s-size-12); vertical-align: middle; }
