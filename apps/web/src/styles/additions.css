@@ -124,8 +124,29 @@ button.pct.lk{border:0;font:inherit}
 .lgdr .bar i{display:block;height:100%}
 .lgc>.lnk{margin-left:var(--s-size-16)}
 
-/* Tabel perbandingan periode (minggu/bulan ini & lalu + kolom pilihan) */
+/* Tabel perbandingan periode: grup Mingguan | Bulanan, kolom KPI menempel saat scroll, periode berjalan diberi highlight */
 .pcmp { margin-bottom: var(--s-size-14); }
-.pcmp-add { display: flex; flex-direction: column; gap: var(--s-size-4); font-size: var(--s-size-12); }
-.pcmp-x { margin-left: var(--s-size-4); border: 0; background: transparent; color: inherit; cursor: pointer; font-size: var(--s-size-14); line-height: 1; opacity: .6; }
-.pcmp-x:hover, .pcmp-x:focus-visible { opacity: 1; }
+.pcmp-tools { display: flex; align-items: center; gap: var(--s-size-8); flex-wrap: wrap; justify-content: flex-end; }
+.pcmp-add { position: relative; display: inline-flex; align-items: center; }
+.pcmp-add > span { position: absolute; left: var(--s-size-10); pointer-events: none; color: var(--primary); font-weight: var(--c-font-weight-700); }
+.pcmp-add select { height: var(--s-size-32); min-width: var(--s-size-150); padding: 0 var(--s-size-10) 0 var(--s-size-28); border: var(--s-size-1) solid var(--line-2); border-radius: var(--r-sm); background: var(--surface); color: var(--ink); font-size: var(--s-size-12p5); font-weight: var(--c-font-weight-600); cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.pcmp-add select:hover:not(:disabled) { border-color: var(--primary); }
+.pcmp-add select:focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 var(--s-size-3) var(--primary-soft); }
+.pcmp-add select:disabled { opacity: .5; cursor: not-allowed; }
+.pcmp-wrap { overflow-x: auto; }
+.pcmp-wrap table { min-width: max-content; width: 100%; }
+.pcmp-wrap th { position: static; cursor: default; text-transform: none; letter-spacing: 0; vertical-align: bottom; }
+.pcmp-wrap th.pcmp-g { text-align: center; text-transform: uppercase; letter-spacing: .06em; font-size: var(--s-size-11); color: var(--primary); border-bottom: var(--s-size-2) solid var(--primary); padding-top: var(--s-size-8); padding-bottom: var(--s-size-6); }
+.pcmp-wrap th.pcmp-col { padding-top: var(--s-size-8); padding-bottom: var(--s-size-8); min-width: var(--s-size-120); }
+.pcmp-name { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--s-size-4); color: var(--ink); font-size: var(--s-size-12p5); font-weight: var(--c-font-weight-700); }
+.pcmp-range { display: block; margin-top: var(--s-size-2); font-size: var(--s-size-11); font-weight: var(--c-font-weight-500); color: var(--muted); font-variant-numeric: tabular-nums; }
+.pcmp-x { display: inline-grid; place-items: center; width: var(--s-size-16); height: var(--s-size-16); padding: 0; border: 0; border-radius: var(--c-border-radius-50); background: var(--surface-3); color: var(--muted); cursor: pointer; font-size: var(--s-size-12); line-height: 1; transition: background .15s, color .15s; }
+.pcmp-x:hover, .pcmp-x:focus-visible { background: var(--bad); color: var(--s-on-brand); }
+.pcmp-wrap th.pcmp-kpi, .pcmp-wrap td.pcmp-kpi { position: sticky; left: 0; z-index: 1; background: var(--surface); text-align: left; font-weight: var(--c-font-weight-600); color: var(--ink-2); border-right: var(--s-size-1) solid var(--line); }
+.pcmp-wrap th.pcmp-kpi { vertical-align: bottom; font-size: var(--s-size-12); text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.pcmp-split { border-left: var(--s-size-1) solid var(--line-2); }
+.pcmp-wrap tbody tr:nth-child(even) td { background: var(--surface-2); }
+.pcmp-wrap tbody tr:hover td { background: var(--primary-soft); }
+.pcmp-wrap th.cur, .pcmp-wrap td.cur { background: var(--primary-soft); }
+.pcmp-wrap td.pcmp-cell { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: var(--s-size-13); font-weight: var(--c-font-weight-600); }
+.pcmp-skel { display: inline-block; width: var(--s-size-48); height: var(--s-size-12); vertical-align: middle; }
