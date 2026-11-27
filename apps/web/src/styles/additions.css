@@ -109,3 +109,17 @@ button.pct.lk{border:0;font:inherit}
 .oee-tools{display:flex;align-items:center;gap:var(--s-size-8)}
 .oee-sort{height:var(--s-size-28);min-width:var(--s-size-28);border:0;background:none;color:var(--primary);font-weight:var(--c-font-weight-600);font-size:var(--s-size-16);line-height:1;border-radius:var(--r-sm);cursor:pointer}
 @media (hover:hover){.oee-sort:hover{background:var(--primary-soft)}}
+
+/* Stop Time ▸ Loss groups: expandable group → categories → details */
+.lgtog{display:inline-flex;align-items:center;border:0;background:none;padding:0;font:inherit;color:inherit;font-weight:var(--c-font-weight-600);cursor:pointer;text-align:left}
+.lgtog .chev{display:inline-block;width:var(--s-size-14);color:var(--muted)}
+.gtab tr.lgrow td{height:auto;padding:var(--s-size-4) 0 var(--s-size-10) var(--s-size-14)}
+.lgc{padding:var(--s-size-6) 0}
+.lgch,.lgdr{display:grid;grid-template-columns:minmax(0,1fr) var(--s-size-44) var(--s-size-70) var(--s-size-40);gap:var(--s-size-8);align-items:center;font-size:var(--s-size-12p5)}
+.lgch{font-weight:var(--c-font-weight-600);padding:var(--s-size-4) 0;border-bottom:var(--s-size-1) solid var(--line)}
+.lgdr{padding:var(--s-size-5) 0 var(--s-size-5) var(--s-size-16);grid-template-rows:auto var(--s-size-4);row-gap:var(--s-size-3);color:var(--ink-2)}
+.lgch .nm,.lgdr .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center}
+.lgch .v,.lgdr .v{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.lgdr .bar{grid-column:1 / -1;height:var(--s-size-4);border-radius:var(--s-size-2);background:var(--surface-3);overflow:hidden}
+.lgdr .bar i{display:block;height:100%}
+.lgc>.lnk{margin-left:var(--s-size-16)}

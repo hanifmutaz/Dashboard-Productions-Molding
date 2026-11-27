@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { PERMISSIONS, type LossGroup, type StopCategoryRef, type StopTimeView } from '@mpd/contracts';
 import { useSession } from '../lib/session';
@@ -27,8 +27,7 @@ export function StopTimePage() {
   const [info, setInfo] = useState(s.disp.info);
   const [tab, setTab] = useState<'stop-0' | 'stop-1' | 'stop-2' | 'stop-3' | 'stop-4'>(sp.get('machine') ? 'stop-1' : 'stop-0');
   const [tdQ, setTdQ] = useState('');
-  const [lgMode, setLgMode] = useState<'' | 'mc' | 'pt'>('');
-  const [lgSel, setLgSel] = useState<LossGroup | ''>('');
+  const [lgOpen, setLgOpen] = useState<LossGroup[]>([]);
   useEffect(() => setInfo(s.disp.info), [s.disp.info]);
   const q = useMonitoring<StopTimeView>('stop-time', { group: group || undefined, category: cat || undefined, includeInfo: String(info) });
   const env = q.data, v = env?.data ?? null, t = v?.totals, p = v?.previous;
@@ -108,34 +107,24 @@ export function StopTimePage() {
           <div className="pane on"><div className="g2">
             <div className="card"><div className="ch"><div><h3>Pareto by category</h3><p>Sorted by minutes · cumulative % in the last column · click a row to filter that category</p></div></div><div className="cb">{v ? pareto() : <div className="empty">{msg}</div>}</div></div>
             <div className="card"><div className="ch"><div><h3>Loss groups</h3><p>Categories rolled up into loss groups (Master Data)</p></div>
-              <div className="seg" role="group" aria-label="Loss groups view">
-                {([['', 'Summary'], ['mc', 'By machine'], ['pt', 'By product']] as const).map(([id, label]) => <button key={id} type="button" className={lgMode === id ? 'on' : ''} aria-pressed={lgMode === id} onClick={() => setLgMode(id)}>{label}</button>)}
-              </div></div>
+</div>
               <div className="cb">
                 <div className="gbar">{(v?.byGroup ?? []).map((g) => <GroupSeg key={g.group} pct={(g.minutes / (t?.minutes || 1)) * 100} color={tokenColor(G.get(g.group)?.color ?? 's-paint-94a3b8')} name={G.get(g.group)?.name ?? g.group} minutes={g.minutes} />)}</div>
                 <table className="gtab"><tbody>
-                  {(v?.byGroup ?? []).map((g) => (
-                    <tr key={g.group}><td><span className="sw" style={{ background: tokenColor(G.get(g.group)?.color ?? '') }} />{G.get(g.group)?.name} <span className="fa">· {g.categories} cat.</span></td><td className="n m">{fmt(g.events)}×</td><td className="n m"><b>{fmt(g.minutes)}</b> min</td><td className="n m">{Math.round((g.minutes / (t?.minutes || 1)) * 100)}%</td></tr>
-                  ))}
+                  {(v?.byGroup ?? []).map((g) => {
+                    const open = lgOpen.includes(g.group);
+                    return (
+                      <Fragment key={g.group}>
+                        <tr><td><button type="button" className="lgtog" aria-expanded={open} title={open ? 'Hide categories and details' : 'Show categories and details'} onClick={() => setLgOpen(open ? lgOpen.filter((x) => x !== g.group) : [...lgOpen, g.group])}><span className="chev" aria-hidden="true">{open ? '⌄' : '›'}</span><span className="sw" style={{ background: tokenColor(G.get(g.group)?.color ?? '') }} />{G.get(g.group)?.name} <span className="fa">· {g.categories} cat.</span></button></td><td className="n m">{fmt(g.events)}×</td><td className="n m"><b>{fmt(g.minutes)}</b> min</td><td className="n m">{Math.round((g.minutes / (t?.minutes || 1)) * 100)}%</td></tr>
+                        {open && v && <tr className="lgrow"><td colSpan={4}><LossGroupDetail v={v} group={g.group} groupMinutes={g.minutes} catOf={catOf} topN={s.disp.topN} /></td></tr>}
+                      </Fragment>
+                    );
+                  })}
                   {!info && <tr><td colSpan={4} className="fa wrap" style={{ fontSize: 'var(--s-size-12)', border: 'none' }}>Info-only categories are hidden.</td></tr>}
                 </tbody></table>
               </div>
             </div>
           </div>
-            {lgMode && v && (
-              <div style={{ marginTop: 'var(--s-size-14)' }}>
-                <div className="chks" role="group" aria-label="Loss group" style={{ marginBottom: 'var(--s-size-10)' }}>
-                  <label><input type="radio" name="lg-sel" checked={lgSel === ''} onChange={() => setLgSel('')} />All groups</label>
-                  {v.groups.filter((g) => g.id !== 'unmapped' && v.byGroup.some((x) => x.group === g.id)).map((g) => <label key={g.id}><input type="radio" name="lg-sel" checked={lgSel === g.id} onChange={() => setLgSel(g.id)} /><span className="sw" style={{ background: tokenColor(g.color) }} />{g.name}</label>)}
-                </div>
-                {(() => {
-                  const list = byLossGroup(lgMode === 'mc' ? v.byMachine : v.byProduct, lgSel, catOf);
-                  return list.length
-                    ? <GroupPanel key={`${lgMode}-${lgSel}`} mode={lgMode} list={list} catOf={catOf} topN={s.disp.topN} initial={null} initialCat={null} />
-                    : <div className="card"><div className="empty">No stop time in this group</div></div>;
-                })()}
-              </div>
-            )}
           </div>
         )}
         {(tab === 'stop-1' || tab === 'stop-2') && (
@@ -210,15 +199,25 @@ function ParetoRow({ c, r, sh, cp, cut, mx, sel, groupName, onClick }: { c: Stop
     </button>
   );
 }
-/** Restricts machines / products to one loss group: only that group's categories and details are kept and totals are recomputed. */
-function byLossGroup(list: Grouped[], group: LossGroup | '', catOf: (id: string) => StopCategoryRef): Grouped[] {
-  if (!group) return list;
-  const keep = (id: string) => catOf(id).group === group;
-  return list.map((x) => {
-    const categories = Object.fromEntries(Object.entries(x.categories).filter(([c]) => keep(c)));
-    const details = x.details.filter((d) => keep(d.categoryId));
-    return { ...x, categories, details, minutes: Object.values(categories).reduce((a, m) => a + m, 0), events: details.reduce((a, d) => a + d.events, 0) };
-  }).filter((x) => x.minutes > 0).sort((a, b) => b.minutes - a.minutes);
+/** Loss groups ▸ expanded: the group's categories, each with its stop details (detail · events · minutes · share of the category). */
+function LossGroupDetail({ v, group, groupMinutes, catOf, topN }: { v: StopTimeView; group: LossGroup; groupMinutes: number; catOf: (id: string) => StopCategoryRef; topN: number }) {
+  const cats = v.byCategory.filter((c) => catOf(c.categoryId).group === group && c.minutes > 0).sort((a, b) => b.minutes - a.minutes);
+  if (!cats.length) return <div className="empty">No stop time in this group</div>;
+  return <div className="lgd">{cats.map((c) => <LossCategoryBlock key={c.categoryId} c={catOf(c.categoryId)} minutes={c.minutes} events={c.events} groupMinutes={groupMinutes} details={v.details.filter((d) => d.categoryId === c.categoryId).sort((a, b) => b.minutes - a.minutes)} topN={topN} />)}</div>;
+}
+function LossCategoryBlock({ c, minutes, events, groupMinutes, details, topN }: { c: StopCategoryRef; minutes: number; events: number; groupMinutes: number; details: StopTimeView['details']; topN: number }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? details : details.slice(0, topN);
+  return (
+    <div className="lgc">
+      <div className="lgch"><span className="nm" title={c.name}><span className="sw" style={{ background: tokenColor(c.color) }} />{c.short}</span><span className="v">{fmt(events)}×</span><span className="v m">{fmt(minutes)} min</span><span className="v">{Math.round((minutes / (groupMinutes || 1)) * 100)}%</span></div>
+      {shown.map((d) => (
+        <div key={d.detail} className="lgdr"><span className="nm" title={d.detail}>{d.detail}</span><span className="v">{fmt(d.events)}×</span><span className="v m">{fmt(d.minutes)} min</span><span className="v">{Math.round((d.minutes / (minutes || 1)) * 100)}%</span>
+          <span className="bar"><i style={{ width: `${(d.minutes / (minutes || 1)) * 100}%`, background: tokenColor(c.color) }} /></span></div>
+      ))}
+      {details.length > topN && <button className="lnk" type="button" onClick={() => setAll((a) => !a)}>{all ? `Show top ${topN}` : `Show all ${details.length} details`}</button>}
+    </div>
+  );
 }
 function GroupSeg({ pct, color, name, minutes }: { pct: number; color: string; name: string; minutes: number }) {
   const tip = useTipProps({ title: name, rows: [{ label: 'Minutes', value: fmt(minutes) }, { label: 'Share', value: f1(pct) + '%' }] });
