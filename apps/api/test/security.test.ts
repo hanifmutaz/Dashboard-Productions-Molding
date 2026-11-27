@@ -15,7 +15,7 @@ beforeEach(async () => {
 
 async function login(username: string) {
   const agent = request.agent(app);
-  await agent.post('/api/auth/login').set('Origin', ORIGIN).send({ username, password: 'correct-horse-battery' }).expect(204);
+  await agent.post('/api/auth/login').set('Origin', ORIGIN).send({ email: `${username}@example.com`, password: 'correct-horse-battery' }).expect(204);
   const me = await agent.get('/api/auth/me').expect(200);
   return { agent, csrf: (me.body as { csrfToken: string }).csrfToken };
 }
@@ -26,16 +26,16 @@ describe('authentication', () => {
     await request(app).get('/api/settings').expect(401);
   });
   it('wrong password -> 401 without revealing which part was wrong, audited', async () => {
-    const r = await request(app).post('/api/auth/login').set('Origin', ORIGIN).send({ username: 'viewer', password: 'nope' }).expect(401);
-    expect((r.body as { error: { message: string } }).error.message).toBe('Username atau password salah.');
+    const r = await request(app).post('/api/auth/login').set('Origin', ORIGIN).send({ email: 'viewer@example.com', password: 'nope' }).expect(401);
+    expect((r.body as { error: { message: string } }).error.message).toBe('Email atau password salah.');
     expect(ctx.audit).toContainEqual({ action: 'auth.login', result: 'failure' });
   });
   it('throttles after 5 failures', async () => {
-    for (let i = 0; i < 5; i++) await request(app).post('/api/auth/login').set('Origin', ORIGIN).send({ username: 'viewer', password: 'x' });
-    await request(app).post('/api/auth/login').set('Origin', ORIGIN).send({ username: 'viewer', password: 'correct-horse-battery' }).expect(429);
+    for (let i = 0; i < 5; i++) await request(app).post('/api/auth/login').set('Origin', ORIGIN).send({ email: 'viewer@example.com', password: 'x' });
+    await request(app).post('/api/auth/login').set('Origin', ORIGIN).send({ email: 'viewer@example.com', password: 'correct-horse-battery' }).expect(429);
   });
   it('sets an HttpOnly SameSite=Strict session cookie', async () => {
-    const r = await request(app).post('/api/auth/login').set('Origin', ORIGIN).send({ username: 'viewer', password: 'correct-horse-battery' }).expect(204);
+    const r = await request(app).post('/api/auth/login').set('Origin', ORIGIN).send({ email: 'viewer@example.com', password: 'correct-horse-battery' }).expect(204);
     const c = String(r.headers['set-cookie']);
     expect(c).toMatch(/HttpOnly/);
     expect(c).toMatch(/SameSite=Strict/);
@@ -80,7 +80,7 @@ describe('authorization (API enforced)', () => {
     await a.agent.post('/api/admin/roles').set('Origin', ORIGIN).set('X-CSRF-Token', a.csrf).send({ name: 'x', description: null, permissions: [], version: null }).expect(403);
     const superRole = ctx.roles.find((r) => r.systemKey === 'superAdmin')!;
     await a.agent.post('/api/admin/users').set('Origin', ORIGIN).set('X-CSRF-Token', a.csrf)
-      .send({ username: 'evil', displayName: 'E', department: null, roleId: superRole.id, password: 'long-enough-password' }).expect(403);
+      .send({ username: 'evil', email: 'evil@example.com', displayName: 'E', department: null, roleId: superRole.id, password: 'long-enough-password' }).expect(403);
   });
   it('audit log is super admin only; others may read their own activity', async () => {
     const a = await login('admin1');

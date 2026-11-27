@@ -1,16 +1,20 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
-import type { AuditEntry, KioskDevice, Material, Part, SettingsBody, StopCategory, StopCategoryInput } from '@mpd/contracts';
+import type { AuditEntry, KioskDevice, Material, Part, Registration, RegistrationStatus, SettingsBody, StopCategory, StopCategoryInput } from '@mpd/contracts';
 import type { Queryable } from './pools.js';
 import { withTransaction } from './pools.js';
 
 /* All SQL lives in this data-access layer (STATE §6). Interfaces allow in-memory fakes in tests. */
 
 export interface UserRow {
-  id: string; username: string; displayName: string; department: string | null; passwordHash: string;
-  roleId: string; roleName: string; roleSystemKey: string | null; active: boolean; lastLoginAt: string | null; version: number;
+  id: string; username: string; email: string | null; displayName: string; department: string | null; passwordHash: string;
+  roleId: string; roleName: string; roleSystemKey: string | null; active: boolean; status: RegistrationStatus; lastLoginAt: string | null; version: number;
 }
+export interface RegisterInput { email: string; username: string; displayName: string; department: string; purpose: string; passwordHash: string; roleId: string }
+
+/** Postgres unique_violation (23505), mis. email/username yang sama didaftarkan bersamaan. */
+export const isUniqueViolation = (e: unknown): boolean => typeof e === 'object' && e !== null && 'code' in e && (e as { code?: unknown }).code === '23505';
 export interface RoleRow { id: string; name: string; description: string | null; isSystem: boolean; systemKey: string | null; permissions: string[]; userCount: number; version: number }
 export interface SessionRow { idHash: string; userId: string; csrfToken: string; lastSeenAt: Date; absoluteExpiresAt: Date; revokedAt: Date | null }
 export interface AuditInput { actorUserId: string | null; actorLabel: string | null; requestId: string | null; action: string; objectType?: string | null; objectId?: string | null; result: 'success' | 'failure' | 'denied'; detail?: unknown }
@@ -26,12 +30,21 @@ export interface Repos {
   };
   users: {
     byUsername(username: string): Promise<UserRow | null>;
+    byEmail(email: string): Promise<UserRow | null>;
     byId(id: string): Promise<UserRow | null>;
+    /** Hanya akun yang sudah disetujui; pendaftar pending/rejected ada di `registrations`. */
     list(): Promise<UserRow[]>;
-    create(u: { username: string; displayName: string; department: string | null; passwordHash: string; roleId: string }): Promise<string>;
-    update(id: string, u: { displayName: string; department: string | null; roleId: string; active: boolean }, version: number): Promise<boolean>;
+    create(u: { username: string; email: string; displayName: string; department: string | null; passwordHash: string; roleId: string }): Promise<string>;
+    /** Hanya mengubah akun 'approved'; false = konflik versi atau akun belum disetujui. */
+    update(id: string, u: { email: string | null; displayName: string; department: string | null; roleId: string; active: boolean }, version: number): Promise<boolean>;
     setPassword(id: string, hash: string): Promise<void>;
     touchLogin(id: string): Promise<void>;
+    /** Akun baru berstatus 'pending' (active=false). Email yang pernah ditolak boleh mendaftar ulang (baris lama dipakai lagi). */
+    register(u: RegisterInput): Promise<{ id: string; again: boolean }>;
+    registrations(status: Exclude<RegistrationStatus, 'approved'>): Promise<Registration[]>;
+    pendingCount(): Promise<number>;
+    approve(id: string, roleId: string, by: string, version: number): Promise<boolean>;
+    reject(id: string, note: string | null, by: string, version: number): Promise<boolean>;
   };
   roles: {
     list(): Promise<RoleRow[]>;
@@ -82,13 +95,18 @@ const iso = (v: unknown): string | null => (v instanceof Date ? v.toISOString() 
 
 type Row = Record<string, unknown>;
 const userFrom = (r: Row): UserRow => ({
-  id: String(r.id), username: String(r.username), displayName: String(r.display_name), department: (r.department as string | null) ?? null,
+  id: String(r.id), username: String(r.username), email: (r.email as string | null) ?? null, displayName: String(r.display_name), department: (r.department as string | null) ?? null,
   passwordHash: String(r.password_hash), roleId: String(r.role_id), roleName: String(r.role_name), roleSystemKey: (r.system_key as string | null) ?? null,
-  active: Boolean(r.active), lastLoginAt: iso(r.last_login_at), version: Number(r.version),
+  active: Boolean(r.active), status: r.status as RegistrationStatus, lastLoginAt: iso(r.last_login_at), version: Number(r.version),
+});
+const registrationFrom = (r: Row): Registration => ({
+  id: String(r.id), email: String(r.email), displayName: String(r.display_name), department: (r.department as string | null) ?? null, purpose: (r.purpose as string | null) ?? null,
+  status: r.status as RegistrationStatus, createdAt: iso(r.created_at) ?? '', reviewedAt: iso(r.reviewed_at), reviewedBy: (r.reviewer_name as string | null) ?? null,
+  reviewNote: (r.review_note as string | null) ?? null, version: Number(r.version),
 });
 const USER_SQL = `SELECT u.*, r.name AS role_name, r.system_key FROM app_user u JOIN app_role r ON r.id = u.role_id`;
 const ROLE_SQL = `SELECT r.*, COALESCE((SELECT array_agg(p.permission ORDER BY p.permission) FROM app_role_permission p WHERE p.role_id = r.id), '{}') AS permissions,
-  (SELECT count(*) FROM app_user u WHERE u.role_id = r.id) AS user_count FROM app_role r`;
+  (SELECT count(*) FROM app_user u WHERE u.role_id = r.id AND u.status = 'approved') AS user_count FROM app_role r`;
 const roleFrom = (r: Row): RoleRow => ({
   id: String(r.id), name: String(r.name), description: (r.description as string | null) ?? null, isSystem: Boolean(r.is_system),
   systemKey: (r.system_key as string | null) ?? null, permissions: (r.permissions as string[]) ?? [], userCount: Number(r.user_count), version: Number(r.version),
@@ -151,22 +169,26 @@ export function createPgRepos(pool: pg.Pool): Repos {
         const r = await q.query(`${USER_SQL} WHERE lower(u.username) = lower($1)`, [username]);
         return r.rows[0] ? userFrom(r.rows[0]) : null;
       },
+      async byEmail(email) {
+        const r = await q.query(`${USER_SQL} WHERE u.email = lower(btrim($1))`, [email]);
+        return r.rows[0] ? userFrom(r.rows[0]) : null;
+      },
       async byId(id) {
         const r = await q.query(`${USER_SQL} WHERE u.id = $1`, [id]);
         return r.rows[0] ? userFrom(r.rows[0]) : null;
       },
       async list() {
-        return (await q.query(`${USER_SQL} ORDER BY lower(u.username)`)).rows.map(userFrom);
+        return (await q.query(`${USER_SQL} WHERE u.status = 'approved' ORDER BY lower(u.username)`)).rows.map(userFrom);
       },
       async create(u) {
         const id = randomUUID();
-        await q.query('INSERT INTO app_user (id, username, display_name, department, password_hash, role_id) VALUES ($1,$2,$3,$4,$5,$6)', [id, u.username, u.displayName, u.department, u.passwordHash, u.roleId]);
+        await q.query('INSERT INTO app_user (id, username, email, display_name, department, password_hash, role_id) VALUES ($1,$2,$3,$4,$5,$6,$7)', [id, u.username, u.email, u.displayName, u.department, u.passwordHash, u.roleId]);
         return id;
       },
       async update(id, u, version) {
         const r = await q.query(
-          'UPDATE app_user SET display_name=$2, department=$3, role_id=$4, active=$5, version=version+1, updated_at=now() WHERE id=$1 AND version=$6',
-          [id, u.displayName, u.department, u.roleId, u.active, version],
+          "UPDATE app_user SET email=$2, display_name=$3, department=$4, role_id=$5, active=$6, version=version+1, updated_at=now() WHERE id=$1 AND version=$7 AND status='approved'",
+          [id, u.email, u.displayName, u.department, u.roleId, u.active, version],
         );
         return r.rowCount === 1;
       },
@@ -175,6 +197,45 @@ export function createPgRepos(pool: pg.Pool): Repos {
       },
       async touchLogin(id) {
         await q.query('UPDATE app_user SET last_login_at=now() WHERE id=$1', [id]);
+      },
+      async register(u) {
+        return run(async (c) => {
+          const again = await c.query(
+            `UPDATE app_user SET display_name=$2, department=$3, purpose=$4, password_hash=$5, role_id=$6, status='pending', active=false,
+               reviewed_by=NULL, reviewed_at=NULL, review_note=NULL, created_at=now(), version=version+1, updated_at=now()
+             WHERE email=$1 AND status='rejected' RETURNING id`,
+            [u.email, u.displayName, u.department, u.purpose, u.passwordHash, u.roleId],
+          );
+          const prior = again.rows[0] as Row | undefined;
+          if (prior) return { id: String(prior.id), again: true };
+          const id = randomUUID();
+          await c.query(
+            "INSERT INTO app_user (id, username, email, display_name, department, purpose, password_hash, role_id, status, active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',false)",
+            [id, u.username, u.email, u.displayName, u.department, u.purpose, u.passwordHash, u.roleId],
+          );
+          return { id, again: false };
+        });
+      },
+      async registrations(status) {
+        const r = await q.query(
+          `SELECT u.*, rv.display_name AS reviewer_name FROM app_user u LEFT JOIN app_user rv ON rv.id = u.reviewed_by
+           WHERE u.status = $1 ORDER BY u.created_at ${status === 'pending' ? 'ASC' : 'DESC'} LIMIT 500`, [status]);
+        return r.rows.map(registrationFrom);
+      },
+      async pendingCount() {
+        return Number((await q.query("SELECT count(*) AS n FROM app_user WHERE status = 'pending'")).rows[0]?.n ?? 0);
+      },
+      async approve(id, roleId, by, version) {
+        const r = await q.query(
+          `UPDATE app_user SET status='approved', active=true, role_id=$2, reviewed_by=$3, reviewed_at=now(), review_note=NULL, version=version+1, updated_at=now()
+           WHERE id=$1 AND status='pending' AND version=$4`, [id, roleId, by, version]);
+        return r.rowCount === 1;
+      },
+      async reject(id, note, by, version) {
+        const r = await q.query(
+          `UPDATE app_user SET status='rejected', active=false, reviewed_by=$2, reviewed_at=now(), review_note=$3, version=version+1, updated_at=now()
+           WHERE id=$1 AND status='pending' AND version=$4`, [id, by, note, version]);
+        return r.rowCount === 1;
       },
     },
     roles: {

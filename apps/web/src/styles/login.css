@@ -11,6 +11,8 @@
   --login-warn-ink: #704419;
   --login-error-bg: #fef0ef;
   --login-error-ink: #9a262d;
+  --login-success-bg: #e8f6ee;
+  --login-success-ink: #1d5c3a;
   display: grid;
   grid-template-columns: minmax(0, 46fr) minmax(0, 54fr);
   min-height: 100vh;
@@ -33,6 +35,8 @@
   --login-warn-ink: #ffdc9f;
   --login-error-bg: #46252e;
   --login-error-ink: #ffc2c4;
+  --login-success-bg: #1d3a2b;
+  --login-success-ink: #b6ecc9;
   color-scheme: dark;
 }
 
@@ -177,7 +181,7 @@
   font-weight: 650;
 }
 
-.login-form input {
+.login-form :is(input, textarea) {
   width: 100%;
   min-width: 0;
   min-height: 50px;
@@ -189,6 +193,48 @@
   font: inherit;
   font-size: 16px;
   font-weight: 400;
+}
+
+.login-form textarea {
+  min-height: 84px;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.login-help {
+  margin: 0;
+  color: var(--login-muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.login-switch {
+  margin: 0;
+  color: var(--login-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.login-switch button {
+  min-height: 44px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--login-primary);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* Honeypot: di luar layar, bukan display:none (sebagian bot melewati field yang display:none). */
+.login-hp {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
 }
 
 .login-submit {
@@ -208,7 +254,7 @@
   cursor: not-allowed;
 }
 
-.login-page :is(button, input):focus-visible {
+.login-page :is(button, input, textarea):focus-visible {
   outline: 2px solid var(--login-focus);
   outline-offset: 3px;
 }
@@ -229,6 +275,11 @@
 .login-error {
   background: var(--login-error-bg);
   color: var(--login-error-ink);
+}
+
+.login-success {
+  background: var(--login-success-bg);
+  color: var(--login-success-ink);
 }
 
 .login-support {

@@ -24,18 +24,82 @@ function Frame({ children }: { children: ReactNode }) {
   );
 }
 
+const MIN_PASSWORD = 12;
+
+/** Form daftar akun mandiri (port dari Production-Dashboard-PD). Akun pending sampai admin menyetujui dan memilih role. */
+function RegisterForm({ onBack }: { onBack: (email?: string) => void }) {
+  const [f, setF] = useState({ email: '', displayName: '', department: '', purpose: '', password: '', confirm: '', website: '' });
+  const [localErr, setLocalErr] = useState<string | null>(null);
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
+  const m = useMutation({
+    mutationFn: () => api.post<{ message: string }>('/api/auth/register', {
+      email: f.email, displayName: f.displayName, department: f.department, purpose: f.purpose, password: f.password, website: f.website,
+    }),
+  });
+  if (m.isSuccess) {
+    return (
+      <div className="login-form" id="register-done">
+        <div className="login-notice login-success" role="status">{m.data.message}</div>
+        <p className="login-help">Anda bisa masuk setelah admin menyetujui pendaftaran. Hubungi admin bila perlu dipercepat.</p>
+        <button className="login-submit" type="button" onClick={() => onBack(f.email.trim())}>Kembali ke halaman masuk</button>
+      </div>
+    );
+  }
+  const err = localErr ?? (m.error instanceof ApiFailure ? m.error.message : m.error ? 'Pendaftaran gagal. Coba lagi.' : null);
+  return (
+    <form className="login-form" id="register-form" aria-labelledby="login-title" onSubmit={(e) => {
+      e.preventDefault();
+      if (m.isPending) return;
+      if (f.password.length < MIN_PASSWORD) return setLocalErr(`Password minimal ${MIN_PASSWORD} karakter.`);
+      if (f.password !== f.confirm) return setLocalErr('Konfirmasi password tidak sama.');
+      setLocalErr(null);
+      m.mutate();
+    }}>
+      <label htmlFor="re">Email
+        <input id="re" type="email" autoComplete="email" autoCapitalize="none" spellCheck={false} maxLength={254} value={f.email} onChange={set('email')} required />
+      </label>
+      <label htmlFor="rn">Nama lengkap
+        <input id="rn" autoComplete="name" minLength={2} maxLength={120} value={f.displayName} onChange={set('displayName')} required />
+      </label>
+      <label htmlFor="rd">Departemen / bagian
+        <input id="rd" minLength={2} maxLength={120} placeholder="mis. Molding, QA, Maintenance" value={f.department} onChange={set('department')} required />
+      </label>
+      <label htmlFor="rp">Kebutuhan akses
+        <textarea id="rp" rows={3} minLength={10} maxLength={500} placeholder="Untuk apa Anda butuh akses dashboard ini?" value={f.purpose} onChange={set('purpose')} required />
+      </label>
+      <label htmlFor="rpw">Password
+        <input id="rpw" type="password" autoComplete="new-password" minLength={MIN_PASSWORD} maxLength={256} value={f.password} onChange={set('password')} required aria-describedby="rpw-hint" />
+        <span className="login-help" id="rpw-hint">Minimal {MIN_PASSWORD} karakter.</span>
+      </label>
+      <label htmlFor="rpc">Ulangi password
+        <input id="rpc" type="password" autoComplete="new-password" maxLength={256} value={f.confirm} onChange={set('confirm')} required />
+      </label>
+      {/* Honeypot anti-bot: tersembunyi dari pengguna & pembaca layar; manusia tidak mengisinya. */}
+      <div className="login-hp" aria-hidden="true">
+        <label htmlFor="rw">Website<input id="rw" tabIndex={-1} autoComplete="off" value={f.website} onChange={set('website')} /></label>
+      </div>
+      {err && <div className="login-notice login-error" role="alert">{err}</div>}
+      <button className="login-submit" type="submit" disabled={m.isPending}>{m.isPending ? 'Mengirim…' : 'Kirim pendaftaran'}</button>
+      <p className="login-switch">Sudah punya akun? <button type="button" onClick={() => onBack()}>Masuk</button></p>
+    </form>
+  );
+}
+
 export function LoginPage() {
-  const [u, setU] = useState('');
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [email, setEmail] = useState('');
   const [p, setP] = useState('');
   const [dark, setDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const [sp] = useSearchParams();
   const nav = useNavigate();
   const qc = useQueryClient();
   const m = useMutation({
-    mutationFn: () => api.post('/api/auth/login', { username: u, password: p }),
+    mutationFn: () => api.post('/api/auth/login', { email, password: p }),
     onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['me'] }); void nav(sp.get('next') ?? '/', { replace: true }); },
   });
   const err = m.error instanceof ApiFailure ? m.error.message : m.error ? 'Gagal masuk.' : null;
+  const pendingInfo = m.error instanceof ApiFailure && (m.error.code === 'ACCOUNT_PENDING' || m.error.code === 'ACCOUNT_REJECTED');
+  const register = mode === 'register';
   return (
     <main className="login-page" data-theme={dark ? 'dark' : 'light'}>
       <div className="login-hero">
@@ -51,7 +115,7 @@ export function LoginPage() {
       <section className="login-panel" aria-labelledby="login-title">
         <div className="login-content">
           <div className="login-heading">
-            <h1 id="login-title">Masuk ke dashboard</h1>
+            <h1 id="login-title">{register ? 'Daftar akun baru' : 'Masuk ke dashboard'}</h1>
             <button className="login-theme" type="button" aria-label="Mode gelap" aria-pressed={dark}
               title={dark ? 'Beralih ke mode terang' : 'Beralih ke mode gelap'} onClick={() => setDark((on) => !on)}>
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -60,23 +124,26 @@ export function LoginPage() {
               </svg>
             </button>
           </div>
-          <form className="login-form" onSubmit={(e) => { e.preventDefault(); m.mutate(); }} aria-labelledby="login-title">
-            {sp.get('reason') === 'password' && <div className="login-notice" role="status">Password diganti. Silakan masuk kembali.</div>}
-            {sp.get('reason') === 'expired' && <div className="login-notice" role="status">Sesi berakhir. Silakan masuk kembali.</div>}
-            <label htmlFor="lu">
-              Username
-              <input id="lu" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false}
-                value={u} onChange={(e) => setU(e.target.value)} required />
-            </label>
-            <label htmlFor="lp">
-              Password
-              <input id="lp" name="password" type="password" autoComplete="current-password"
-                value={p} onChange={(e) => setP(e.target.value)} required />
-            </label>
-            {err && <div className="login-notice login-error" role="alert">{err}</div>}
-            <button className="login-submit" type="submit" disabled={m.isPending || !u || !p}>{m.isPending ? 'Sedang masuk…' : 'Masuk'}</button>
-          </form>
-          <p className="login-support">Lupa password? Hubungi administrator.</p>
+          {register ? <RegisterForm onBack={(registered) => { if (registered) setEmail(registered); m.reset(); setMode('login'); }} /> : (
+            <form className="login-form" onSubmit={(e) => { e.preventDefault(); m.mutate(); }} aria-labelledby="login-title">
+              {sp.get('reason') === 'password' && <div className="login-notice" role="status">Password diganti. Silakan masuk kembali.</div>}
+              {sp.get('reason') === 'expired' && <div className="login-notice" role="status">Sesi berakhir. Silakan masuk kembali.</div>}
+              <label htmlFor="lu">
+                Email
+                <input id="lu" name="email" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={254}
+                  value={email} onChange={(e) => setEmail(e.target.value)} required />
+              </label>
+              <label htmlFor="lp">
+                Password
+                <input id="lp" name="password" type="password" autoComplete="current-password"
+                  value={p} onChange={(e) => setP(e.target.value)} required />
+              </label>
+              {err && <div className={pendingInfo ? 'login-notice' : 'login-notice login-error'} role="alert">{err}</div>}
+              <button className="login-submit" type="submit" disabled={m.isPending || !email || !p}>{m.isPending ? 'Sedang masuk…' : 'Masuk'}</button>
+              <p className="login-switch">Belum punya akun? <button type="button" onClick={() => setMode('register')}>Daftar</button></p>
+            </form>
+          )}
+          <p className="login-support">Akun baru perlu disetujui admin. Lupa password atau akun lama belum punya email? Hubungi administrator.</p>
         </div>
       </section>
     </main>

@@ -13,7 +13,12 @@ export async function memoryRepos() {
     { id: randomUUID(), name: 'User', description: null, isSystem: true, systemKey: 'user', permissions: [...DEFAULT_ROLE_PERMISSIONS.user], userCount: 0, version: 0 },
   ];
   const hash = await hashPassword('correct-horse-battery');
-  const mk = (username: string, r: RoleRow): UserRow => ({ id: randomUUID(), username, displayName: username, department: null, passwordHash: hash, roleId: r.id, roleName: r.name, roleSystemKey: r.systemKey, active: true, lastLoginAt: null, version: 0 });
+  const mk = (username: string, r: RoleRow): UserRow => ({ id: randomUUID(), username, email: `${username}@example.com`, displayName: username, department: null, passwordHash: hash, roleId: r.id, roleName: r.name, roleSystemKey: r.systemKey, active: true, status: 'approved', lastLoginAt: null, version: 0 });
+  type Extra = { purpose: string | null; createdAt: string; reviewedAt: string | null; reviewedBy: string | null; reviewNote: string | null };
+  const extra = new Map<string, Extra>();
+  const unique = (u: { username: string; email: string | null }, self?: string) => {
+    if (users.some((x) => x.id !== self && (x.username.toLowerCase() === u.username.toLowerCase() || (u.email !== null && x.email === u.email)))) throw Object.assign(new Error('duplicate'), { code: '23505' });
+  };
   const users = [mk('root', roles[0]!), mk('admin1', roles[1]!), mk('viewer', roles[2]!)];
   const sessions = new Map<string, SessionRow>();
   const audit: { action: string; result: string }[] = [];
@@ -41,12 +46,55 @@ export async function memoryRepos() {
     schemaReady: () => Promise.resolve(true),
     users: {
       byUsername: (u) => Promise.resolve(users.find((x) => x.username.toLowerCase() === u.toLowerCase()) ?? null),
+      byEmail: (e) => Promise.resolve(users.find((x) => x.email === e.trim().toLowerCase()) ?? null),
       byId: (id) => Promise.resolve(users.find((x) => x.id === id) ?? null),
-      list: () => Promise.resolve(users),
-      create: (u) => { const r = roles.find((x) => x.id === u.roleId)!; const row = { ...mk(u.username, r), displayName: u.displayName }; users.push(row); return Promise.resolve(row.id); },
-      update: (id, u, v) => { const x = users.find((y) => y.id === id); if (!x || x.version !== v) return Promise.resolve(false); Object.assign(x, u, { version: v + 1 }); return Promise.resolve(true); },
-      setPassword: () => Promise.resolve(),
+      list: () => Promise.resolve(users.filter((x) => x.status === 'approved')),
+      create: (u) => { unique(u); const r = roles.find((x) => x.id === u.roleId)!; const row = { ...mk(u.username, r), email: u.email, displayName: u.displayName }; users.push(row); return Promise.resolve(row.id); },
+      update: (id, u, v) => {
+        const x = users.find((y) => y.id === id);
+        if (!x || x.version !== v || x.status !== 'approved') return Promise.resolve(false);
+        unique({ username: x.username, email: u.email }, id);
+        const r = roles.find((y) => y.id === u.roleId)!;
+        Object.assign(x, u, { roleName: r.name, roleSystemKey: r.systemKey, version: v + 1 });
+        return Promise.resolve(true);
+      },
+      setPassword: (id, h) => { const x = users.find((y) => y.id === id); if (x) x.passwordHash = h; return Promise.resolve(); },
       touchLogin: () => Promise.resolve(),
+      register: (u) => {
+        const r = roles.find((x) => x.id === u.roleId)!;
+        const old = users.find((x) => x.email === u.email && x.status === 'rejected');
+        const meta: Extra = { purpose: u.purpose, createdAt: new Date().toISOString(), reviewedAt: null, reviewedBy: null, reviewNote: null };
+        if (old) {
+          Object.assign(old, { displayName: u.displayName, department: u.department, passwordHash: u.passwordHash, status: 'pending', active: false, version: old.version + 1 });
+          extra.set(old.id, meta);
+          return Promise.resolve({ id: old.id, again: true });
+        }
+        unique(u);
+        const row: UserRow = { ...mk(u.username, r), email: u.email, displayName: u.displayName, department: u.department, passwordHash: u.passwordHash, status: 'pending', active: false };
+        users.push(row);
+        extra.set(row.id, meta);
+        return Promise.resolve({ id: row.id, again: false });
+      },
+      registrations: (status) => Promise.resolve(users.filter((x) => x.status === status).map((x) => {
+        const m = extra.get(x.id);
+        return { id: x.id, email: x.email ?? '', displayName: x.displayName, department: x.department, purpose: m?.purpose ?? null, status: x.status, createdAt: m?.createdAt ?? '', reviewedAt: m?.reviewedAt ?? null, reviewedBy: m?.reviewedBy ?? null, reviewNote: m?.reviewNote ?? null, version: x.version };
+      })),
+      pendingCount: () => Promise.resolve(users.filter((x) => x.status === 'pending').length),
+      approve: (id, roleId, by, v) => {
+        const x = users.find((y) => y.id === id);
+        if (!x || x.status !== 'pending' || x.version !== v) return Promise.resolve(false);
+        const r = roles.find((y) => y.id === roleId)!;
+        Object.assign(x, { status: 'approved', active: true, roleId, roleName: r.name, roleSystemKey: r.systemKey, version: v + 1 });
+        extra.set(id, { ...extra.get(id)!, reviewedAt: new Date().toISOString(), reviewedBy: by });
+        return Promise.resolve(true);
+      },
+      reject: (id, note, by, v) => {
+        const x = users.find((y) => y.id === id);
+        if (!x || x.status !== 'pending' || x.version !== v) return Promise.resolve(false);
+        Object.assign(x, { status: 'rejected', active: false, version: v + 1 });
+        extra.set(id, { ...extra.get(id)!, reviewedAt: new Date().toISOString(), reviewedBy: by, reviewNote: note });
+        return Promise.resolve(true);
+      },
     },
     roles: {
       list: () => Promise.resolve(roles),

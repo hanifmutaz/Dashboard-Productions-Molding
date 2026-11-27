@@ -19,6 +19,7 @@
     "db:migrate": "node --env-file-if-exists=apps/api/.env apps/api/dist/cli/migrate.js",
     "db:create-admin": "node --env-file-if-exists=apps/api/.env apps/api/dist/cli/create-admin.js",
     "db:reset-password": "node --env-file-if-exists=apps/api/.env apps/api/dist/cli/reset-password.js",
+    "db:set-email": "node --env-file-if-exists=apps/api/.env apps/api/dist/cli/set-email.js",
     "start": "node apps/api/dist/server.js",
     "verify": "npm run build:pkgs && npm run lint && npm run typecheck && npm run test && npm run build && npm run guard:production"
   },

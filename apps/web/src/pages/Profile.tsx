@@ -43,7 +43,7 @@ export function ProfilePage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-size-14)' }}>
             <div className="card"><div className="ch"><div><h3>Account</h3><p>Local account managed by the administrator</p></div></div>
               <div className="cb"><dl className="kvl">
-                <dt>Full name</dt><dd>{u.displayName}</dd><dt>Username</dt><dd className="mono">{u.username}</dd><dt>Department</dt><dd>{u.department ?? '—'}</dd>
+                <dt>Full name</dt><dd>{u.displayName}</dd><dt>Username</dt><dd className="mono">{u.username}</dd><dt>Email</dt><dd className="mono">{u.email ?? '—'}</dd><dt>Department</dt><dd>{u.department ?? '—'}</dd>
                 <dt>Role</dt><dd style={{ color: 'var(--primary)', fontWeight: 'var(--c-font-weight-600)' }}>{u.roleName}</dd><dt>Sign-in method</dt><dd>Local account</dd>
                 <dt>Last sign-in</dt><dd>{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</dd>
               </dl></div></div>

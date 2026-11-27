@@ -1,22 +1,96 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PERMISSIONS, PERMISSION_LABELS, type AuditEntry, type KioskDevice, type PairingCode, type Permission, type Role, type User } from '@mpd/contracts';
+import { PERMISSIONS, PERMISSION_LABELS, type AuditEntry, type KioskDevice, type PairingCode, type Permission, type Registration, type Role, type User } from '@mpd/contracts';
 import { ApiFailure, api, qs } from '../lib/api';
 import { useSession } from '../lib/session';
 import { DataTable } from '../components/table';
-import { Modal, Tabs, useToast } from '../components/ui';
+import { Modal, Seg, Tabs, useToast } from '../components/ui';
 
 const errText = (e: unknown) => (e instanceof ApiFailure ? e.message : 'Permintaan gagal.');
 const dt = (s: string | null) => (s ? new Date(s).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+
+/* ---------------- Pendaftaran akun mandiri (approve / reject) ---------------- */
+function RegistrationsCard({ assignable, query }: { assignable: Role[]; query: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [status, setStatus] = useState<'pending' | 'rejected'>('pending');
+  const list = useQuery({ queryKey: ['admin-registrations', status], queryFn: () => api.get<Registration[]>(`/api/admin/registrations?${qs({ status })}`) });
+  const [decide, setDecide] = useState<{ reg: Registration; kind: 'approve' | 'reject'; roleId: string; note: string } | null>(null);
+  const defaultRole = (assignable.find((r) => r.name === 'User') ?? assignable[assignable.length - 1])?.id ?? '';
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['admin-registrations'] });
+    void qc.invalidateQueries({ queryKey: ['admin-registrations-count'] });
+    void qc.invalidateQueries({ queryKey: ['admin-users'] });
+    void qc.invalidateQueries({ queryKey: ['admin-roles'] });
+  };
+  const act = useMutation({
+    mutationFn: (d: NonNullable<typeof decide>) => (d.kind === 'approve'
+      ? api.post(`/api/admin/registrations/${d.reg.id}/approve`, { roleId: d.roleId, version: d.reg.version })
+      : api.post(`/api/admin/registrations/${d.reg.id}/reject`, { note: d.note.trim() || null, version: d.reg.version })),
+    onSuccess: (_r, d) => { setDecide(null); toast(d.kind === 'approve' ? `${d.reg.email} disetujui` : `${d.reg.email} ditolak`); refresh(); },
+    onError: (e) => { if (e instanceof ApiFailure && e.status === 409) refresh(); },
+  });
+  const rows = (list.data ?? []).filter((r) => [r.email, r.displayName, r.department, r.purpose].some((v) => v?.toLowerCase().includes(query)));
+  const pendingView = status === 'pending';
+  return (
+    <section className="card">
+      <div className="ch">
+        <div><h3>Pendaftaran akun</h3><p>{pendingView ? 'Akun dari form Daftar menunggu persetujuan · role dipilih saat approve' : 'Pendaftaran yang ditolak · email boleh mendaftar ulang'}</p></div>
+        <Seg value={status} onChange={setStatus} items={[{ id: 'pending', label: 'Pending' }, { id: 'rejected', label: 'Ditolak' }]} />
+      </div>
+      <DataTable rows={rows} rowKey={(r) => r.id} sort={{ k: 'createdAt', asc: pendingView }}
+        empty={list.isPending ? 'Memuat…' : list.error ? errText(list.error) : query ? 'Tidak ada yang cocok' : pendingView ? 'Tidak ada pendaftaran yang menunggu' : 'Belum ada pendaftaran yang ditolak'}
+        cols={[
+          { k: 'email', h: 'Email', cl: 'mono' },
+          { k: 'displayName', h: 'Name', cl: 'wrap', f: (r) => <>{r.displayName}{r.department && <div className="mu">{r.department}</div>}</> },
+          { k: 'purpose', h: 'Kebutuhan akses', cl: 'mu wrap' },
+          { k: 'createdAt', h: 'Didaftarkan', cl: 'm', f: (r) => dt(r.createdAt) },
+          ...(pendingView
+            ? [{ k: 'action', h: 'Actions', nos: true, f: (r: Registration) => (
+              <div style={{ display: 'flex', gap: 'var(--s-size-8)' }}>
+                <button className="btn pri" type="button" aria-label={'Approve · ' + r.email} onClick={() => { act.reset(); setDecide({ reg: r, kind: 'approve', roleId: defaultRole, note: '' }); }}>Approve</button>
+                <button className="btn" type="button" aria-label={'Reject · ' + r.email} onClick={() => { act.reset(); setDecide({ reg: r, kind: 'reject', roleId: '', note: '' }); }}>Reject</button>
+              </div>
+            ) }]
+            : [
+              { k: 'reviewedBy', h: 'Ditolak oleh', f: (r: Registration) => r.reviewedBy ?? '—' },
+              { k: 'reviewNote', h: 'Catatan', cl: 'mu', f: (r: Registration) => r.reviewNote ?? '—' },
+            ]),
+        ]} />
+      {decide && (
+        <Modal open onClose={() => { if (!act.isPending) setDecide(null); }} title={decide.kind === 'approve' ? `Approve · ${decide.reg.email}` : `Reject · ${decide.reg.email}`}
+          sub={decide.kind === 'approve' ? 'Akun langsung aktif dengan role yang dipilih' : 'User akan melihat pesan "pendaftaran ditolak" saat login'}>
+          <form className="form" onSubmit={(e) => { e.preventDefault(); if (!act.isPending) act.mutate(decide); }}>
+            <div className="fld"><span className="lb">Pendaftar</span><div>{decide.reg.displayName}{decide.reg.department ? ` · ${decide.reg.department}` : ''}</div></div>
+            {decide.reg.purpose && <div className="fld"><span className="lb">Kebutuhan akses</span><div className="mu">{decide.reg.purpose}</div></div>}
+            {decide.kind === 'approve'
+              ? <div className="fld"><label htmlFor="rg-role">Role</label><select id="rg-role" value={decide.roleId} onChange={(e) => setDecide({ ...decide, roleId: e.target.value })} required>
+                {assignable.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select><div className="hint">Hanya role dengan permission yang juga Anda miliki</div></div>
+              : <div className="fld"><label htmlFor="rg-note">Catatan (opsional)</label><input id="rg-note" maxLength={200} value={decide.note} onChange={(e) => setDecide({ ...decide, note: e.target.value })} /></div>}
+            {act.isError && <div className="banner e" role="alert" style={{ gridColumn: '1/-1' }}>{errText(act.error)}</div>}
+            <div style={{ gridColumn: '1/-1', display: 'flex', gap: 'var(--s-size-8)', justifyContent: 'flex-end' }}>
+              <button className="btn" type="button" disabled={act.isPending} onClick={() => setDecide(null)}>Cancel</button>
+              <button className="btn pri" type="submit" disabled={act.isPending || (decide.kind === 'approve' && !decide.roleId)}>
+                {act.isPending ? 'Memproses…' : decide.kind === 'approve' ? 'Approve' : 'Reject'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </section>
+  );
+}
 
 /* ---------------- Users & roles ---------------- */
 export function UsersPage() {
   const { can, me } = useSession();
   const qc = useQueryClient();
   const toast = useToast();
-  const [tab, setTab] = useState<'u' | 'r'>('u');
+  const [tab, setTab] = useState<'u' | 'g' | 'r'>('u');
   const [search, setSearch] = useState('');
   const users = useQuery({ queryKey: ['admin-users'], queryFn: () => api.get<User[]>('/api/admin/users') });
+  const regCount = useQuery({ queryKey: ['admin-registrations-count'], queryFn: () => api.get<{ pending: number }>('/api/admin/registrations/count'), refetchInterval: 60_000 });
   const roles = useQuery({ queryKey: ['admin-roles'], queryFn: () => api.get<{ roles: Role[]; permissions: Permission[] }>('/api/admin/roles') });
   const [edit, setEdit] = useState<(Partial<User> & { password?: string }) | null>(null);
   const [resetPassword, setResetPassword] = useState<string | null>(null);
@@ -27,8 +101,8 @@ export function UsersPage() {
   const done = (m: string) => { setErr(null); setEdit(null); setRoleEdit(null); toast(m); void qc.invalidateQueries({ queryKey: ['admin-users'] }); void qc.invalidateQueries({ queryKey: ['admin-roles'] }); };
   const saveUser = useMutation({
     mutationFn: (u: Partial<User> & { password?: string }) => (u.id
-      ? api.put(`/api/admin/users/${u.id}`, { displayName: u.displayName, department: u.department || null, roleId: u.roleId, active: u.active, version: u.version })
-      : api.post('/api/admin/users', { username: u.username, displayName: u.displayName, department: u.department || null, roleId: u.roleId, password: u.password })),
+      ? api.put(`/api/admin/users/${u.id}`, { email: u.email?.trim() || null, displayName: u.displayName, department: u.department || null, roleId: u.roleId, active: u.active, version: u.version })
+      : api.post('/api/admin/users', { username: u.username, email: u.email, displayName: u.displayName, department: u.department || null, roleId: u.roleId, password: u.password })),
     onSuccess: () => done('User saved'), onError: (e) => setErr(errText(e)),
   });
   const resetPw = useMutation({ mutationFn: (a: { id: string; password: string }) => api.post(`/api/admin/users/${a.id}/password`, { password: a.password }), onSuccess: () => { setResetPassword(null); done('Password reset · user sessions revoked'); }, onError: (e) => setErr(errText(e)) });
@@ -41,28 +115,31 @@ export function UsersPage() {
   const canRoles = can(PERMISSIONS.manageRoles);
   const query = search.trim().toLowerCase();
   const matches = (...fields: (string | null)[]) => fields.some((value) => value?.toLowerCase().includes(query));
-  const userRows = users.data?.filter((u) => matches(u.username, u.displayName, u.department, u.roleName)) ?? [];
+  const userRows = users.data?.filter((u) => matches(u.username, u.email, u.displayName, u.department, u.roleName)) ?? [];
   const roleRows = roles.data?.roles.filter((r) => matches(r.name, r.description, ...r.permissions.map((p) => PERMISSION_LABELS[p as Permission] ?? p))) ?? [];
   const userTab = tab === 'u';
+  const pendingN = regCount.data?.pending ?? 0;
+  const noEmail = users.data?.filter((u) => !u.email).length ?? 0;
   const openUser = (u: User) => { setErr(null); setEdit(u); };
   const openRole = (r: Role) => { setErr(null); setRoleEdit(r); };
   return (
     <section className="view on"><div className="content accounts-content">
-      <Tabs value={tab} onChange={(next) => { setTab(next); setSearch(''); }} items={[{ id: 'u', label: 'Users' }, { id: 'r', label: 'Roles & permissions' }]}
+      <Tabs value={tab} onChange={(next) => { setTab(next); setSearch(''); }} items={[{ id: 'u', label: 'Users' }, { id: 'g', label: pendingN ? `Pendaftaran (${pendingN})` : 'Pendaftaran' }, { id: 'r', label: 'Roles & permissions' }]}
         right={<div className="accounts-tools">
-          <label className="fld"><span>{userTab ? 'Search users' : 'Search roles'}</span>
-            <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={userTab ? 'Search name or username' : 'Search role or permission'} />
+          <label className="fld"><span>{tab === 'r' ? 'Search roles' : tab === 'g' ? 'Search registrations' : 'Search users'}</span>
+            <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={tab === 'r' ? 'Search role or permission' : tab === 'g' ? 'Search email, name or department' : 'Search name, email or username'} />
           </label>
-          {userTab ? <button className="btn pri" type="button" onClick={() => { setErr(null); setEdit({ active: true, roleId: assignable[assignable.length - 1]?.id }); }}>Add user</button>
+          {tab === 'g' ? null : userTab ? <button className="btn pri" type="button" onClick={() => { setErr(null); setEdit({ active: true, roleId: assignable[assignable.length - 1]?.id }); }}>Add user</button>
             : canRoles && <button className="btn pri" type="button" onClick={() => { setErr(null); setRoleEdit({ permissions: [] }); }}>Add role</button>}
         </div>} />
-      {userTab ? (
+      {tab === 'g' ? <RegistrationsCard assignable={assignable} query={query} /> : userTab ? (
         <section className="card">
           <div className="ch"><div><h3>Users</h3>{users.data && <p>{users.data.length} accounts · {users.data.filter((u) => u.active).length} active</p>}</div></div>
+          {noEmail > 0 && <div className="cb"><div className="banner w" role="status">{noEmail} akun belum punya email dan tidak bisa login. Buka Edit user lalu isi Email.</div></div>}
           <DataTable rows={userRows} rowKey={(u) => u.id} sort={{ k: 'username', asc: true }} onRowClick={openUser}
             empty={users.isPending ? 'Memuat…' : users.error ? errText(users.error) : query ? 'No matching users' : 'No users'}
             cols={[
-              { k: 'username', h: 'Username', cl: 'mono' }, { k: 'displayName', h: 'Name' }, { k: 'department', h: 'Department', cl: 'mu' }, { k: 'roleName', h: 'Role' },
+              { k: 'username', h: 'Username', cl: 'mono' }, { k: 'email', h: 'Email', cl: 'mono', f: (u) => u.email ?? <span className="chip warn">Belum ada email</span> }, { k: 'displayName', h: 'Name' }, { k: 'department', h: 'Department', cl: 'mu' }, { k: 'roleName', h: 'Role' },
               { k: 'active', h: 'Status', f: (u) => (u.active ? <span className="chip good">Active</span> : <span className="chip">Disabled</span>) },
               { k: 'lastLoginAt', h: 'Last sign-in', cl: 'm', f: (u) => dt(u.lastLoginAt) },
               { k: 'action', h: 'Actions', nos: true, f: (u) => <button className="btn" type="button" aria-label={'Edit user · ' + u.username} onClick={(e) => { e.stopPropagation(); openUser(u); }}>Edit user</button> },
@@ -89,6 +166,7 @@ export function UsersPage() {
         <Modal open onClose={() => { if (!resetPw.isPending) { setEdit(null); setResetPassword(null); } }} title={edit.id ? `Edit user · ${edit.username}` : 'Add user'} sub="Role yang dapat diberikan dibatasi oleh permission Anda sendiri">
           <form className="form" onSubmit={(e) => { e.preventDefault(); saveUser.mutate(edit); }}>
             {!edit.id && <div className="fld"><label htmlFor="uu">Username</label><input id="uu" autoComplete="off" value={edit.username ?? ''} onChange={(e) => setEdit({ ...edit, username: e.target.value })} required /></div>}
+            <div className="fld"><label htmlFor="ue">Email (untuk login)</label><input id="ue" type="email" autoComplete="off" maxLength={254} value={edit.email ?? ''} onChange={(e) => setEdit({ ...edit, email: e.target.value })} required={!edit.id} />{edit.id && !edit.email && <div className="hint">Tanpa email, user ini tidak bisa login</div>}</div>
             <div className="fld"><label htmlFor="un">Name</label><input id="un" value={edit.displayName ?? ''} onChange={(e) => setEdit({ ...edit, displayName: e.target.value })} required /></div>
             <div className="fld"><label htmlFor="ud">Department</label><input id="ud" value={edit.department ?? ''} onChange={(e) => setEdit({ ...edit, department: e.target.value })} /></div>
             <div className="fld"><label htmlFor="ur">Role</label><select id="ur" value={edit.roleId ?? ''} onChange={(e) => setEdit({ ...edit, roleId: e.target.value })}>{assignable.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
