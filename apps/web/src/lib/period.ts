@@ -31,3 +31,19 @@ export const shiftLabel = (shifts: SettingsBody['shifts'], shift: number) => {
   return `Shift ${shift} · ${hh(starts[shift - 1]!)}–${hh(starts[shift % 3]!)}`;
 };
 export const rangeTxt = (from: string, to: string) => `${lbl(from)} – ${lblY(to)}`;
+
+/** Minggu (Senin–Minggu) ke-N sebelum minggu ini; offset 0 = minggu ini (dipotong sampai hari produksi ini). */
+export function weekRange(offset: number, today = productionToday()): { from: string; to: string } {
+  const t = pd(today), a = add(t, -((t.getUTCDay() + 6) % 7) - 7 * offset);
+  let b = add(a, 6);
+  if (iso(b) > today) b = t;
+  return { from: iso(a), to: iso(b) };
+}
+/** Bulan kalender ke-N sebelum bulan ini; offset 0 = bulan ini (dipotong sampai hari produksi ini). */
+export function monthRange(offset: number, today = productionToday()): { from: string; to: string } {
+  const t = pd(today);
+  const a = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - offset, 1));
+  let b = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - offset + 1, 0));
+  if (iso(b) > today) b = t;
+  return { from: iso(a), to: iso(b) };
+}

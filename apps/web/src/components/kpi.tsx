@@ -21,7 +21,7 @@ export function Kpi(o: KpiProps) {
         <s style={sp}>target {t}%</s>
       </div>
     );
-  }
+  } 
   const click = o.onClick;
   return (
     <div className={`kpi${click ? ' click' : ''}`} title={o.title}

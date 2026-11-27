@@ -11,6 +11,8 @@ import { Menu, MenuItem, Tabs, useTipProps, useToast } from '../components/ui';
 import { EnvelopeBanner, emptyMsg } from '../components/state';
 import { shiftLabel } from '../lib/period';
 import { useMonitoring } from '../lib/monitoring';
+import { PeriodCompare } from '../components/PeriodCompare';
+import { stopRows } from '../lib/compareRows';
 import { Field, Toggle } from '../components/ops';
 
 type Grouped = StopTimeView['byMachine'][number] | StopTimeView['byProduct'][number];
@@ -101,6 +103,7 @@ export function StopTimePage() {
             </div>
           </div>
         </div>
+        <PeriodCompare path="stop-time" rows={stopRows} extra={{ group: group || undefined, category: cat || undefined, includeInfo: String(info) }} />
         <Tabs value={tab} onChange={setTab} items={[{ id: 'stop-0', label: 'Overview' }, { id: 'stop-1', label: 'By machine' }, { id: 'stop-2', label: 'By product' }, { id: 'stop-3', label: 'Top details' }, { id: 'stop-4', label: 'Ranking & shift' }]}
           right={<div className="legend">{(v?.groups ?? []).filter((g) => g.id !== 'unmapped').map((g) => <span key={g.id}><i style={{ background: tokenColor(g.color) }} />{g.name}</span>)}</div>} />
         {tab === 'stop-0' && (

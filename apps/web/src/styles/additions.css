@@ -123,3 +123,9 @@ button.pct.lk{border:0;font:inherit}
 .lgdr .bar{grid-column:1 / -1;height:var(--s-size-4);border-radius:var(--s-size-2);background:var(--surface-3);overflow:hidden}
 .lgdr .bar i{display:block;height:100%}
 .lgc>.lnk{margin-left:var(--s-size-16)}
+
+/* Tabel perbandingan periode (minggu/bulan ini & lalu + kolom pilihan) */
+.pcmp { margin-bottom: var(--s-size-14); }
+.pcmp-add { display: flex; flex-direction: column; gap: var(--s-size-4); font-size: var(--s-size-12); }
+.pcmp-x { margin-left: var(--s-size-4); border: 0; background: transparent; color: inherit; cursor: pointer; font-size: var(--s-size-14); line-height: 1; opacity: .6; }
+.pcmp-x:hover, .pcmp-x:focus-visible { opacity: 1; }

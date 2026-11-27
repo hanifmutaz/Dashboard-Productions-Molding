@@ -5,6 +5,8 @@ import { Chart } from '../components/charts';
 import { EmptyDeck, Kpi, SkelDeck } from '../components/kpi';
 import { DataTable, type Col } from '../components/table';
 import { useMonitoring } from '../lib/monitoring';
+import { PeriodCompare } from '../components/PeriodCompare';
+import { salesRows, scrapRows } from '../lib/compareRows';
 import { EnvelopeBanner, emptyMsg } from '../components/state';
 
 /* Sales: rumus final (Q-009, owner 2026-11-18). Scrap: NG gram ConMas x harga material per gram (Master Data); rumus nilai PROPOSED, menunggu approver Quality/Finance.
@@ -34,6 +36,7 @@ export function SalesPage() {
       ) : q.isPending ? <SkelDeck n={3} /> : <div className="deck"><EmptyDeck labels={['Sales', 'Production actual', 'Average price']} msg={msg} /></div>}
       {v && <p className="note">Valuasi memakai harga terakhir yang tercatat sampai akhir tanggal produksi (tanggal lokal plant). Harga sebelum histori dimulai tidak ditebak. Kolom harga kosong juga dapat berarti harga berbeda dalam periode.</p>}
       {v && v.uncoveredQty > 0 && <div className="banner w" role="status">{fmt(v.uncoveredQty)} pcs output tidak memiliki Harga/PCS yang tercatat untuk tanggal produksi. Output itu tidak dihitung ke Sales (bukan dianggap Rp 0). Periksa <Link className="lnk" to="/operations">riwayat harga</Link>.</div>}
+      <PeriodCompare path="sales" rows={salesRows} />
       <div className="g2e">
         <div className="card"><div className="ch"><div><h3>Sales per month</h3><p>Rp · bulan di dalam rentang tanggal yang dipilih</p></div></div><div className="cb">
           {v && v.byMonth.length ? <Chart aria="Sales per month" labels={v.byMonth.map((m) => monthLbl(m.key))} h={240} bw={28} yFmt={kf} vFmt={kf} tipT={(i) => monthLbl(v.byMonth[i]!.key)}
@@ -102,6 +105,7 @@ export function ScrapPage() {
       {v?.priceUnitSuspect && <div className="banner w" role="status"><b>Cek satuan harga material.</b> Ada harga material ≥ Rp 10.000 per gram, yang tidak wajar untuk resin; kemungkinan harga di CSV per kg. Kalau benar, Scrap value dan ratio terlihat 1.000× terlalu besar. Perbaiki di <Link className="lnk" to="/master-data">Master Data</Link>.</div>}
       {v && v.unvaluedGram > 0 && <div className="banner w" role="status">{fmt(v.unvaluedGram)} gram scrap berasal dari part tanpa material atau material tanpa harga di <Link className="lnk" to="/master-data">Master Data</Link>. Gram itu tercatat di Scrap weight tetapi tidak dihitung ke Scrap value (bukan dianggap Rp 0).</div>}
       {v && v.recordsWithoutGram > 0 && <div className="banner w" role="status">{fmt(v.recordsWithoutGram)} dari {fmt(v.recordsTotal)} record produksi belum punya NG (gram) di ConMas. Record itu tidak dihitung sebagai scrap 0.</div>}
+      <PeriodCompare path="scrap" rows={scrapRows} />
       <div className="card"><div className="ch"><div><h3>Scrap per month</h3><p>Rp per material (5 terbesar) · garis = scrap ratio (scrap ÷ sales)</p></div></div><div className="cb">
         {v && v.byMonth.length ? <Chart aria="Scrap per month" labels={v.byMonth.map((m) => monthLbl(m.key))} h={300} bw={34} stack yFmt={kf} vFmt={kf} tipT={(i) => monthLbl(v.byMonth[i]!.key)}
           bars={monthBars.length ? monthBars : [{ name: 'Scrap value (Rp)', col: 'var(--act)', vals: v.byMonth.map((m) => m.hasValuation === false ? null : m.scrapValue) }]}

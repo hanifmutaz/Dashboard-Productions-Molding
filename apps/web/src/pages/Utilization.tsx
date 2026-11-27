@@ -10,6 +10,8 @@ import { DataTable, downloadCsv, type Col } from '../components/table';
 import { Menu, MenuItem, Tabs, useToast } from '../components/ui';
 import { EnvelopeBanner, emptyMsg } from '../components/state';
 import { useMonitoring } from '../lib/monitoring';
+import { PeriodCompare } from '../components/PeriodCompare';
+import { utilizationRows } from '../lib/compareRows';
 import { RateModal, type RateTarget } from './RateModal';
 
 type OeeSort = 'machine' | 'oee-desc' | 'oee-asc';
@@ -94,6 +96,7 @@ export function UtilizationPage() {
             </>
           )}
         </div>
+        <PeriodCompare path="utilization" rows={utilizationRows} />
         <Tabs value={tab} onChange={setTab} items={[{ id: 'util-0', label: 'OEE breakdown' }, { id: 'util-1', label: 'Ranking' }, { id: 'util-2', label: 'Machine table' }]}
           right={<div className="legend"><span><i style={{ background: 'var(--bad)' }} />More than {s.band} pt below target</span><span><i style={{ background: 'var(--warn)' }} />Below target</span><span><i style={{ background: 'var(--good)' }} />At / above target</span></div>} />
         {tab === 'util-0' && (

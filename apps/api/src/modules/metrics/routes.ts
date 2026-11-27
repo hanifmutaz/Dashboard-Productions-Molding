@@ -52,8 +52,9 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     const q = parse(RangeQuerySchema, req.query);
     return { from: q.from, to: q.to, shift: q.shift ?? null, days: daysBetween(q.from, q.to) };
   };
-  const loadRange = async (range: Range) => {
-    const [cur, prev] = await Promise.all([read(range.from, range.to), live(shiftDate(range.from, -range.days), shiftDate(range.from, -1)).catch(() => null)]);
+  /** noPrevious=true: dipakai tabel perbandingan periode di web, yang tidak butuh periode pembanding (hemat satu query ConMas). */
+  const loadRange = async (range: Range, skipPrevious = false) => {
+    const [cur, prev] = await Promise.all([read(range.from, range.to), skipPrevious ? Promise.resolve(null) : live(shiftDate(range.from, -range.days), shiftDate(range.from, -1)).catch(() => null)]);
     return { cur, prev: cur.snapshotAt ? null : prev };
   };
 
@@ -65,7 +66,7 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     const s = await settings();
     const { resolve } = categoryResolver(await categories());
     res.json(await envelope(range, async () => {
-      const { cur, prev } = await loadRange(range);
+      const { cur, prev } = await loadRange(range, req.query.noPrevious === 'true');
       return { records: shiftsOf(filterMachines(cur.records, mf, s, range.shift), range.shift), invalid: cur.invalidRows, duplicates: cur.duplicatesDropped, ambiguousGroups: cur.ambiguousGroups, snapshotAt:cur.snapshotAt, approvedGroups:cur.approvedGroups, build: (rs) => buildProduction(rs, prev ? filterMachines(prev.records, mf, s, range.shift) : null, range, s, resolve) };
     }));
   });
@@ -76,7 +77,7 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     const s = await settings();
     const { resolve } = categoryResolver(await categories());
     res.json(await envelope(range, async () => {
-      const { cur, prev } = await loadRange(range);
+      const { cur, prev } = await loadRange(range, req.query.noPrevious === 'true');
       const calendar = operationsPool && !range.shift ? await operationsPool.query<CalendarDay>('SELECT work_date::text, day_type, planned_minutes FROM md_work_calendar WHERE work_date BETWEEN $1::date AND $2::date', [range.from, range.to]) : null;
       const schedule = operationsPool && process.env.MPD_SCHEDULE_KPI==='true' ? await loadCalendar(operationsPool,shiftDate(range.from,-range.days),range.to) : undefined;
       return { records: shiftsOf(filterMachines(cur.records, mf, s, range.shift), range.shift), invalid: cur.invalidRows, duplicates: cur.duplicatesDropped, ambiguousGroups: cur.ambiguousGroups,snapshotAt:cur.snapshotAt,approvedGroups:cur.approvedGroups,
@@ -93,7 +94,7 @@ export function metricsRoutes(repos: Repos, conmas: ConmasSource, cache: Metrics
     const { resolve, refs } = categoryResolver(await categories());
     const filter = { group: f.group, category: f.category, includeInfo: f.includeInfo ? f.includeInfo === 'true' : s.disp.info };
     res.json(await envelope(range, async () => {
-      const { cur, prev } = await loadRange(range);
+      const { cur, prev } = await loadRange(range, req.query.noPrevious === 'true');
       return { records: shiftsOf(filterMachines(cur.records, mf, s, range.shift), range.shift), invalid: cur.invalidRows, duplicates: cur.duplicatesDropped, ambiguousGroups: cur.ambiguousGroups, snapshotAt:cur.snapshotAt, approvedGroups:cur.approvedGroups, build: (rs) => buildStopTime(rs, prev ? filterMachines(prev.records, mf, s, range.shift) : null, range, refs, resolve, filter) };
     }));
   });

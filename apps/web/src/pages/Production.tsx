@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { PERMISSIONS, type MachineProduction, type ProductionView } from '@mpd/contracts';
 import { useMonitoring } from '../lib/monitoring';
+import { PeriodCompare } from '../components/PeriodCompare';
+import { productionRows } from '../lib/compareRows';
 import { useSession } from '../lib/session';
 import { cls, colOf, delta, mv, Pc } from '../lib/status';
 import { DOW, f1, fmt, lbl, lblY, pd } from '../lib/format';
@@ -74,6 +76,7 @@ export function ProductionPage() {
             </>
           )}
         </div>
+        <PeriodCompare path="production" rows={productionRows} />
         <Tabs value={tab} onChange={setTab} items={[{ id: 'prod-0', label: 'Daily trend' }, { id: 'prod-1', label: 'By machine' }, { id: 'prod-2', label: 'Ranking' }]} />
         {tab === 'prod-0' && (
           <div className="pane on"><div className="card">
