@@ -91,20 +91,14 @@ export function buildProduction(records: SourceRecord[], prev: SourceRecord[] | 
   return { range, totals, previous: prev && prev.length ? prodTotals(filterShift(prev, range.shift), resolve) : null, machines, daily, groups };
 }
 
-/** Keeps only machines matching the search text and achievement status (Status capaian filter). */
-export function filterMachines(records: SourceRecord[], f: { status?: 'attention' | 'within' | 'unknown'; q?: string }, s: SettingsBody, shift: string | null): SourceRecord[] {
+/** Keeps only machines matching the search text. */
+export function filterMachines(records: SourceRecord[], f: { q?: string }, _s: SettingsBody, shift: string | null): SourceRecord[] {
   const q = f.q?.toLowerCase();
-  if (!q && !f.status) return records;
+  if (!q) return records;
   const keep = new Set<string>();
   groupBy(filterShift(records, shift), (r) => r.machineNo).forEach((list, mc) => {
     const latest = list.reduce((a, b) => (b.date > a.date ? b : a));
     if (q && !`mc ${mc} mc${mc} ${latest.productName ?? ''} ${latest.dpNo ?? ''}`.toLowerCase().includes(q)) return;
-    if (f.status) {
-      const reported = list.some((r) => r.plan !== null) && list.some((r) => r.actual !== null);
-      const b = reported ? bekidoritsu(sum(list, (r) => r.actual ?? 0), sum(list, (r) => r.plan ?? 0)).value : null;
-      const st = b === null ? 'unknown' : b < s.prob.beki ? 'attention' : 'within';
-      if (st !== f.status) return;
-    }
     keep.add(mc);
   });
   return records.filter((r) => keep.has(r.machineNo));

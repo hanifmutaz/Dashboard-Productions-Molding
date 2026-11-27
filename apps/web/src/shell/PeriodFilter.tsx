@@ -21,27 +21,23 @@ const earliest = '0001-01-01';
 const dateAtMidnight = (day: string) => new Date(`${day}T00:00:00Z`);
 const daySteps = new Map([['ArrowLeft', -1], ['ArrowRight', 1], ['ArrowUp', -7], ['ArrowDown', 7]]);
 
-const statusOptions: [Filters['status'], string][] = [
-  ['', 'All machines'], ['attention', 'Perlu perhatian'], ['within', 'Dalam batas capaian'], ['unknown', 'Capaian belum tersedia'],
-];
-
-interface Draft { from: string; to: string; preset: Preset; shift: Filters['shift']; status: Filters['status'] }
+interface Draft { from: string; to: string; preset: Preset; shift: Filters['shift'] }
 export type PeriodValue = Draft;
 type ShiftOption = { value: Filters['shift']; label: string };
 
-/** Satu popover untuk periode + shift + status capaian: bar filter tetap ringkas. Terhubung ke filter global halaman monitoring. */
-export function PeriodFilter({ shifts, showStatus }: { shifts: ShiftOption[]; showStatus: boolean }) {
+/** Satu popover untuk periode + shift: bar filter tetap ringkas. Terhubung ke filter global halaman monitoring. */
+export function PeriodFilter({ shifts }: { shifts: ShiftOption[] }) {
   const { f, setF, today } = useFilters();
-  return <PeriodPicker value={f} today={today} shifts={shifts} showStatus={showStatus} ids
-    onApply={(v) => setF({ ...(v.preset === 'custom' ? { from: v.from, to: v.to, preset: 'custom' as const } : { preset: v.preset }), shift: v.shift, ...(showStatus ? { status: v.status } : {}) })} />;
+  return <PeriodPicker value={f} today={today} shifts={shifts} ids
+    onApply={(v) => setF({ ...(v.preset === 'custom' ? { from: v.from, to: v.to, preset: 'custom' as const } : { preset: v.preset }), shift: v.shift })} />;
 }
 
 /** Pemilih periode yang sama, tapi terkontrol: dipakai juga oleh Export Data / laporan supaya tampilan & perilaku tanggal seragam. */
-export function PeriodPicker({ value: f, onApply, today, shifts, showStatus = false, showShift = true, ids = false }: {
-  value: PeriodValue; onApply: (v: PeriodValue) => void; today: string; shifts: ShiftOption[]; showStatus?: boolean; showShift?: boolean; ids?: boolean;
+export function PeriodPicker({ value: f, onApply, today, shifts, showShift = true, ids = false }: {
+  value: PeriodValue; onApply: (v: PeriodValue) => void; today: string; shifts: ShiftOption[]; showShift?: boolean; ids?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<Draft>({ from: f.from, to: f.to, preset: f.preset, shift: f.shift, status: f.status });
+  const [draft, setDraft] = useState<Draft>({ from: f.from, to: f.to, preset: f.preset, shift: f.shift });
   const [cursor, setCursor] = useState(today);
   const [selectingEnd, setSelectingEnd] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
@@ -131,7 +127,6 @@ export function PeriodPicker({ value: f, onApply, today, shifts, showStatus = fa
   const weeks = Math.ceil((leading + length) / 7);
   const activeParts = [
     showShift && f.shift ? shifts.find((shift) => shift.value === f.shift)?.label : undefined,
-    showStatus && f.status ? statusOptions.find(([value]) => value === f.status)?.[1] : undefined,
   ].filter((part): part is string => Boolean(part));
   const activeCount = activeParts.length;
   const activeTitle = activeParts.join(' · ');
@@ -149,7 +144,7 @@ export function PeriodPicker({ value: f, onApply, today, shifts, showStatus = fa
       <button ref={trigger} className="fin pbtn" type="button" aria-haspopup="dialog" aria-expanded={open}
         aria-controls={open ? dialogId : undefined} onClick={() => {
           if (open) { close(); return; }
-          setDraft({ from: f.from, to: f.to, preset: f.preset, shift: f.shift, status: f.status });
+          setDraft({ from: f.from, to: f.to, preset: f.preset, shift: f.shift });
           setCursor(f.to);
           setSelectingEnd(false);
           setOpen(true);
@@ -178,13 +173,6 @@ export function PeriodPicker({ value: f, onApply, today, shifts, showStatus = fa
           </label>}
           <label>Dari<input type="date" min={earliest} max={today} value={preview.from} onChange={(event) => updateDate('from', event.target.value)} /></label>
           <label>Sampai<input type="date" min={earliest} max={today} value={preview.to} onChange={(event) => updateDate('to', event.target.value)} /></label>
-          {showStatus && (
-            <label className="period-wide">Status capaian
-              <select id={ids ? 'fStatus' : undefined} value={draft.status} onChange={(event) => setDraft((d) => ({ ...d, status: event.target.value as Filters['status'] }))}>
-                {statusOptions.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
-              </select>
-            </label>
-          )}
         </div>
         <div className="period-calendar">
           <div className="period-month">

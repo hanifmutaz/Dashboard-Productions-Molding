@@ -17,6 +17,6 @@ export type RangeQuery = z.infer<typeof RangeQuerySchema>;
 
 export const VersionedSchema = z.object({ version: z.number().int().nonnegative() });
 
-/** Machine filter (status capaian + search) applied server-side so totals stay consistent (ADR-003). */
-export const MachineFilterSchema = z.object({ status: z.enum(['attention', 'within', 'unknown']).optional(), q: z.string().trim().max(60).optional() });
+/** Machine filter (search) applied server-side so totals stay consistent (ADR-003). */
+export const MachineFilterSchema = z.object({ q: z.string().trim().max(60).optional() });
 export type MachineFilter = z.infer<typeof MachineFilterSchema>;

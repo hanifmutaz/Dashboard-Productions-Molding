@@ -43,7 +43,6 @@ body.dark .period-panel { color-scheme: dark; }
 }
 
 .period-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 8px; }
-.period-wide { grid-column: 1 / -1; }
 .period-calendar { border-block-start: 1px solid var(--line); padding-block-start: 6px; }
 
 .period-month {

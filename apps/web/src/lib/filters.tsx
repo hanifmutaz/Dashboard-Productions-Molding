@@ -5,7 +5,7 @@ import type { PRESETS } from './period';
 import { presetRange, productionToday, type Preset } from './period';
 import { useSession } from './session';
 
-export interface Filters { from: string; to: string; preset: Preset; shift: '' | '1' | '2' | '3'; status: '' | 'attention' | 'within' | 'unknown'; q: string }
+export interface Filters { from: string; to: string; preset: Preset; shift: '' | '1' | '2' | '3'; q: string }
 export interface SourceStatus { phase: 'idle' | 'loading' | 'ready' | 'error'; state?: ViewDataEnvelope<unknown>['state']; freshness?: Freshness; sourceUpdatedAt?: string | null; notices?: Notice[] }
 
 interface Ctx {
@@ -26,7 +26,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   const finance = pathname === '/sales' || pathname === '/scrap';
   const [now, setNow] = useState(() => new Date());
   const today = productionToday(now, settings.shifts.s1, me?.plantUtcOffsetMinutes);
-  const init = (): Filters => ({ ...presetRange(prefs.period, today), preset: prefs.period, shift: prefs.shift, status: '', q: '' });
+  const init = (): Filters => ({ ...presetRange(prefs.period, today), preset: prefs.period, shift: prefs.shift, q: '' });
   const [stored, set] = useState<Filters>(init);
   const [sources, setSources] = useState<Record<string, SourceStatus>>({});
   const setSource = useCallback((id: string, value?: SourceStatus) => setSources((current) => {
@@ -60,7 +60,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     f,
     setF: (p) => { clearShared(); set((c) => ({ ...(shared ? f : c), ...p })); },
     applyPreset: (p) => { clearShared(); set((c) => ({ ...(shared ? f : c), preset: p })); },
-    reset: () => { clearShared(); set({ ...presetRange(prefs.period, today), preset: prefs.period, shift: prefs.shift, status: '', q: '' }); },
+    reset: () => { clearShared(); set({ ...presetRange(prefs.period, today), preset: prefs.period, shift: prefs.shift, q: '' }); },
     source: Object.values(sources).at(-1) ?? { phase: 'idle' }, setSource, today,
   }), [f, shared, clearShared, sources, setSource, today, prefs.period, prefs.shift]);
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>;

@@ -216,7 +216,7 @@ function Band({ page }: { page: PageMeta }) {
       </div>
       {page.filtered && (
         <div className="filters">
-          <PeriodFilter key={page.key} showStatus={!finance}
+          <PeriodFilter key={page.key}
             shifts={[1, 2, 3].map((n) => ({ value: String(n) as typeof f.shift, label: shiftLbl(n) }))} />
           {!finance && <div className="f fsearch"><input className="fin" id="fSearch" type="search" aria-label="Machine / part" placeholder="Search MC No or part…" value={q} onChange={(e) => setQ(e.target.value)} /></div>}
           <button className="reset" type="button" onClick={reset}>Reset</button>

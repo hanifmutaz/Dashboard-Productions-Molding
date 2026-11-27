@@ -27,6 +27,7 @@ export function StopTimePage() {
   const [info, setInfo] = useState(s.disp.info);
   const [tab, setTab] = useState<'stop-0' | 'stop-1' | 'stop-2' | 'stop-3' | 'stop-4'>(sp.get('machine') ? 'stop-1' : 'stop-0');
   const [tdQ, setTdQ] = useState('');
+  const [lgSel, setLgSel] = useState<LossGroup | ''>('');
   useEffect(() => setInfo(s.disp.info), [s.disp.info]);
   const q = useMonitoring<StopTimeView>('stop-time', { group: group || undefined, category: cat || undefined, includeInfo: String(info) });
   const env = q.data, v = env?.data ?? null, t = v?.totals, p = v?.previous;
@@ -110,10 +111,11 @@ export function StopTimePage() {
                 <div className="gbar">{(v?.byGroup ?? []).map((g) => <GroupSeg key={g.group} pct={(g.minutes / (t?.minutes || 1)) * 100} color={tokenColor(G.get(g.group)?.color ?? 's-paint-94a3b8')} name={G.get(g.group)?.name ?? g.group} minutes={g.minutes} />)}</div>
                 <table className="gtab"><tbody>
                   {(v?.byGroup ?? []).map((g) => (
-                    <tr key={g.group}><td><span className="sw" style={{ background: tokenColor(G.get(g.group)?.color ?? '') }} />{G.get(g.group)?.name} <span className="fa">· {g.categories} cat.</span></td><td className="n m">{fmt(g.events)}×</td><td className="n m"><b>{fmt(g.minutes)}</b> min</td><td className="n m">{Math.round((g.minutes / (t?.minutes || 1)) * 100)}%</td></tr>
+                    <tr key={g.group} className={lgSel === g.group ? 'sel' : undefined}><td><button type="button" className="lnk lgsel" aria-pressed={lgSel === g.group} title="Show this group by machine and product" onClick={() => setLgSel(lgSel === g.group ? '' : g.group)}><span className="sw" style={{ background: tokenColor(G.get(g.group)?.color ?? '') }} />{G.get(g.group)?.name}</button> <span className="fa">· {g.categories} cat.</span></td><td className="n m">{fmt(g.events)}×</td><td className="n m"><b>{fmt(g.minutes)}</b> min</td><td className="n m">{Math.round((g.minutes / (t?.minutes || 1)) * 100)}%</td></tr>
                   ))}
                   {!info && <tr><td colSpan={4} className="fa wrap" style={{ fontSize: 'var(--s-size-12)', border: 'none' }}>Info-only categories are hidden.</td></tr>}
                 </tbody></table>
+                {v && <LossGroupBreakdown v={v} sel={lgSel} onSel={setLgSel} catOf={catOf} topN={s.disp.topN} />}
               </div>
             </div>
           </div></div>
@@ -188,6 +190,43 @@ function ParetoRow({ c, r, sh, cp, cut, mx, sel, groupName, onClick }: { c: Stop
       <span className="hb"><i style={{ width: `${(r.minutes / mx) * 100}%`, background: tokenColor(c.color) }} /></span>
       <span className="hv">{fmt(r.minutes)}</span><span className="hv m">{Math.round(sh)}%</span><span className="hv">{Math.round(cp)}%</span>
     </button>
+  );
+}
+/** Loss groups ▸ detail: minutes of the selected loss group (or all groups) split by machine or by product. */
+function LossGroupBreakdown({ v, sel, onSel, catOf, topN }: { v: StopTimeView; sel: LossGroup | ''; onSel: (g: LossGroup | '') => void; catOf: (id: string) => StopCategoryRef; topN: number }) {
+  const [mode, setMode] = useState<'mc' | 'pt'>('mc');
+  const [all, setAll] = useState(false);
+  const gInfo = v.groups.find((g) => g.id === sel);
+  const color = sel ? tokenColor(gInfo?.color ?? 's-paint-94a3b8') : 'var(--primary)';
+  const inGroup = (id: string) => !sel || catOf(id).group === sel;
+  const list = (mode === 'mc' ? v.byMachine : v.byProduct).map((x) => {
+    const cats = Object.entries(x.categories).filter(([c]) => inGroup(c));
+    const minutes = cats.reduce((a, [, m]) => a + m, 0);
+    const events = x.details.filter((d) => inGroup(d.categoryId)).reduce((a, d) => a + d.events, 0);
+    const top = cats.sort((a, b) => b[1] - a[1]).slice(0, 3);
+    return { key: 'machineNo' in x ? x.machineNo : x.productName, label: 'machineNo' in x ? `MC ${x.machineNo}` : x.productName, minutes, events, top };
+  }).filter((x) => x.minutes > 0).sort((a, b) => b.minutes - a.minutes);
+  const sum = list.reduce((a, x) => a + x.minutes, 0), total = sum || 1;
+  const shown = all ? list : list.slice(0, topN);
+  const scope = gInfo?.name ?? 'All loss groups';
+  const unit = mode === 'mc' ? 'machine' : 'product';
+  return (
+    <div className="lgd" style={{ marginTop: 'var(--s-size-14)' }}>
+      <div className="ch" style={{ padding: 0, marginBottom: 'var(--s-size-8)' }}>
+        <div style={{ minWidth: 0 }}><h3 style={{ fontSize: 'var(--s-size-13)' }}>{scope} · by {unit}</h3><p>{list.length} {unit}{list.length === 1 ? '' : 's'} · {fmt(sum)} min{sel ? '' : ' · click a group above to narrow'}</p></div>
+        <div className="seg" role="group" aria-label="Break down by">
+          <button type="button" className={mode === 'mc' ? 'on' : ''} aria-pressed={mode === 'mc'} onClick={() => { setMode('mc'); setAll(false); }}>By machine</button>
+          <button type="button" className={mode === 'pt' ? 'on' : ''} aria-pressed={mode === 'pt'} onClick={() => { setMode('pt'); setAll(false); }}>By product</button>
+        </div>
+      </div>
+      {sel && <button type="button" className="lnk" onClick={() => onSel('')}>‹ Show all groups</button>}
+      <div className="bl">
+        <BarList text kw={mode === 'mc' ? 'var(--s-size-58)' : 'var(--s-size-150)'} vw="var(--s-size-90)" empty="No stop time in this group" max={list[0]?.minutes}
+          items={shown.map((x) => ({ k: x.label, v: x.minutes, c: color, l: `${fmt(x.minutes)} min · ${Math.round((x.minutes / total) * 100)}%`,
+            tip: { title: x.label, rows: [{ label: 'Minutes', value: fmt(x.minutes) }, { label: 'Events', value: fmt(x.events) + '×' }, { label: 'Share of ' + scope, value: f1((x.minutes / total) * 100) + '%' }, ...x.top.map(([c, m]) => ({ label: catOf(c).short, value: fmt(m) + ' min', color: tokenColor(catOf(c).color) }))] } }))} />
+      </div>
+      {list.length > topN && <div className="ffoot"><span /><button className="lnk" type="button" onClick={() => setAll((a) => !a)}>{all ? `Show top ${topN}` : `Show all ${list.length}`}</button></div>}
+    </div>
   );
 }
 function GroupSeg({ pct, color, name, minutes }: { pct: number; color: string; name: string; minutes: number }) {

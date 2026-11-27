@@ -12,6 +12,9 @@ import { EnvelopeBanner, emptyMsg } from '../components/state';
 import { useMonitoring } from '../lib/monitoring';
 import { RateModal, type RateTarget } from './RateModal';
 
+type OeeStatus = '' | 'lo' | 'mid' | 'ok' | 'none';
+type OeeSort = 'machine' | 'oee-desc' | 'oee-asc';
+
 function Mini({ label, m, k }: { label: string; m: Metric; k: TargetKey }) {
   const { settings: s } = useSession();
   const c = cls(m.value, k, s);
@@ -34,10 +37,31 @@ export function UtilizationPage() {
   const [sel, setSel] = useState<string | null>(null);
   const [fac, setFac] = useState<'avail' | 'perf' | 'qual'>('avail');
   const [rate, setRate] = useState<RateTarget | null>(null);
+  const [oq, setOq] = useState('');
+  const [ost, setOst] = useState<OeeStatus>('');
+  const [osort, setOsort] = useState<OeeSort>('machine');
   const env = q.data, v = env?.data ?? null, t = v?.totals, p = v?.previous;
   const msg = emptyMsg(env);
   const ms = v?.machines ?? [];
-  const cur = ms.find((m) => m.machineNo === sel) ?? ms[0];
+  const oeeFiltered = !!oq.trim() || ost !== '' || osort !== 'machine';
+  const fms = (() => {
+    const needle = oq.trim().toLowerCase();
+    const rows = ms.filter((m) => {
+      if (needle && !`mc ${m.machineNo} mc${m.machineNo} ${m.productName ?? ''}`.toLowerCase().includes(needle)) return false;
+      if (ost === '') return true;
+      const c = cls(m.oee.value, 'oee', s);
+      return ost === 'none' ? m.oee.value === null : c === ost;
+    });
+    if (osort === 'oee-desc' || osort === 'oee-asc') {
+      const dir = osort === 'oee-desc' ? -1 : 1;
+      rows.sort((a, b) => {
+        if (a.oee.value === null || b.oee.value === null) return a.oee.value === b.oee.value ? 0 : a.oee.value === null ? 1 : -1;
+        return (a.oee.value - b.oee.value) * dir;
+      });
+    }
+    return rows;
+  })();
+  const cur = fms.find((m) => m.machineNo === sel) ?? fms[0];
   const rk = ms.some((m) => m.oee.value !== null) ? ({ key: 'oee', label: 'OEE' } as const) : ({ key: 'kikai', label: 'Kikai Kadouritsu' } as const);
   const vs = p ? <span className="fa">vs previous {v?.range.days} days</span> : null;
   const kpiRate = (k: 'kikai' | 'sogo' | 'shugyo', label: string, desc: string) => (
@@ -88,9 +112,26 @@ export function UtilizationPage() {
           right={<div className="legend"><span><i style={{ background: 'var(--bad)' }} />More than {s.band} pt below target</span><span><i style={{ background: 'var(--warn)' }} />Below target</span><span><i style={{ background: 'var(--good)' }} />At / above target</span></div>} />
         {tab === 'util-0' && (
           <div className="pane on"><div className="g2">
-            <div className="card"><div className="ch"><div><h3>OEE by machine</h3><p>Select a machine to see its losses · OEE from ConMas, shows “—” when ConMas has no value</p></div><span className="chip">{ms.length} machines</span></div>
-              <div className="cb"><div className="bl scroll" style={{ maxHeight: 'var(--s-size-520)' }}>
-                <BarList max={100} kw="var(--s-size-62)" vw="var(--s-size-70)" empty={msg || 'No data'} items={ms.map((m) => ({ k: 'MC ' + m.machineNo, v: m.oee.value ?? 0, c: colOf(cls(m.oee.value, 'oee', s)), l: m.oee.value === null ? '—' : f1(m.oee.value) + '%', sel: m.machineNo === cur?.machineNo, onClick: () => setSel(m.machineNo),
+            <div className="card"><div className="ch"><div><h3>OEE by machine</h3><p>Select a machine to see its losses · OEE from ConMas, shows “—” when ConMas has no value</p></div><span className="chip">{fms.length === ms.length ? `${ms.length} machines` : `${fms.length} / ${ms.length} machines`}</span></div>
+              <div className="cb">
+                <div className="oee-filter">
+                  <input className="srch" type="search" placeholder="Search MC No or part…" aria-label="Search machine or part in OEE by machine" value={oq} onChange={(e) => setOq(e.target.value)} />
+                  <select aria-label="Filter OEE by status" value={ost} onChange={(e) => setOst(e.target.value as OeeStatus)}>
+                    <option value="">All status</option>
+                    <option value="lo">More than {s.band} pt below target</option>
+                    <option value="mid">Below target</option>
+                    <option value="ok">At / above target</option>
+                    <option value="none">No OEE value</option>
+                  </select>
+                  <select aria-label="Sort OEE by machine" value={osort} onChange={(e) => setOsort(e.target.value as OeeSort)}>
+                    <option value="machine">Sort: Machine no.</option>
+                    <option value="oee-desc">Sort: OEE high → low</option>
+                    <option value="oee-asc">Sort: OEE low → high</option>
+                  </select>
+                  <button className="btn" type="button" disabled={!oeeFiltered} onClick={() => { setOq(''); setOst(''); setOsort('machine'); }}>Reset</button>
+                </div>
+                <div className="bl scroll" style={{ maxHeight: 'var(--s-size-520)' }}>
+                <BarList max={100} kw="var(--s-size-62)" vw="var(--s-size-70)" empty={msg || (ms.length ? 'No machine matches this filter' : 'No data')} items={fms.map((m) => ({ k: 'MC ' + m.machineNo, v: m.oee.value ?? 0, c: colOf(cls(m.oee.value, 'oee', s)), l: m.oee.value === null ? '—' : f1(m.oee.value) + '%', sel: m.machineNo === cur?.machineNo, onClick: () => setSel(m.machineNo),
                   tip: { title: `MC ${m.machineNo}`, rows: [{ label: m.productName ?? '', value: '' }, { label: 'OEE', value: f1(m.oee.value) + '%' }, { label: 'Quality', value: f1(m.quality.value) + '%' }, { label: 'Kikai', value: f1(m.kikai.value) + '%' }] } }))} />
               </div></div>
             </div>
@@ -126,7 +167,7 @@ export function UtilizationPage() {
                     </div>
                   </div>
                 </>
-              ) : <div className="empty">{msg || 'No data'}</div>}
+              ) : <div className="empty">{msg || (ms.length ? 'No machine matches this filter' : 'No data')}</div>}
             </div>
           </div></div>
         )}

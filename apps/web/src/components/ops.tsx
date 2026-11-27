@@ -116,7 +116,7 @@ export type { PeriodValue };
 /** Report period state, starting from the same period as the monitoring pages. */
 export function useOpsRange() {
   const { f } = useFilters();
-  return useState<PeriodValue>(() => ({ from: f.from, to: f.to, preset: f.preset, shift: f.shift, status: '' }));
+  return useState<PeriodValue>(() => ({ from: f.from, to: f.to, preset: f.preset, shift: f.shift }));
 }
 
 /** Period field: the same popover picker as Production / Stop Time (presets, calendar, shift). */

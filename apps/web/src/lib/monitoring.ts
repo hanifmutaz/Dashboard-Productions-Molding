@@ -9,7 +9,6 @@ export function useMonitoring<T>(path: string, extra: Record<string, string | un
   const { settings } = useSession();
   const params = qs({
     from: f.from, to: f.to, shift: f.shift,
-    status: path === 'sales' || path === 'scrap' ? undefined : f.status,
     q: path === 'sales' || path === 'scrap' ? undefined : f.q,
     ...extra,
   });

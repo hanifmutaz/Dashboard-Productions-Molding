@@ -20,7 +20,7 @@ export function RateModal({ target, onClose }: { target: RateTarget; onClose: ()
   const { f } = useFilters();
   const { settings: s } = useSession();
   const [k, setK] = useState<RateKey>(target.k ?? 'beki');
-  const params = qs({ from: f.from, to: f.to, shift: f.shift, status: f.status, q: f.q, machineNo: target.machineNo });
+  const params = qs({ from: f.from, to: f.to, shift: f.shift, q: f.q, machineNo: target.machineNo });
   const q = useQuery({
     queryKey: ['daily-rates', params],
     queryFn: ({ signal }) => api.get<ViewDataEnvelope<DailyRatesView>>(`/api/v1/monitoring/daily-rates?${params}`, signal),

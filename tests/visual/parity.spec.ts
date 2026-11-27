@@ -10,15 +10,14 @@ const me = { kind: 'user', csrfToken: 't', user: { id: 'u1', username: 'viewer',
 const env = (data: unknown, state = 'current') => ({ state, data, freshness: 'not-applicable', sourceUpdatedAt: '2026-11-07T08:00:00+07:00', generatedAt: '2026-11-07T08:05:00+07:00', notices: [] });
 const metric = (v: number | null) => (v === null ? { value: null, reason: 'Rumus belum disetujui (Q-003)' } : { value: v, reason: null });
 
-/** Shift & status capaian ada di popover periode: buka dulu, pilih, lalu Terapkan. */
+/** Shift ada di popover periode: buka dulu, pilih, lalu Terapkan. */
 async function openFilters(page: Page) {
   await page.locator('.period-filter .pbtn').click();
   await expect(page.getByRole('dialog', { name: 'Filter periode' })).toBeVisible();
 }
-async function applyFilters(page: Page, values: { shift?: string; status?: string }) {
+async function applyFilters(page: Page, values: { shift?: string }) {
   await openFilters(page);
   if (values.shift !== undefined) await page.locator('#fShift').selectOption(values.shift);
-  if (values.status !== undefined) await page.locator('#fStatus').selectOption(values.status);
   await page.getByRole('button', { name: 'Terapkan' }).click();
 }
 
@@ -103,7 +102,6 @@ test('UI behavior · drill-down preserves machine scope', async ({ page }) => {
   await stub(page);
   await page.route('**/api/v1/monitoring/daily-rates**', (r) => r.fulfill({ json: env(null, 'empty') }));
   await page.goto('/production');
-  await applyFilters(page, { status: 'attention' });
   const scoped = page.waitForResponse((response) => response.url().includes('/monitoring/production') && new URL(response.url()).searchParams.get('q') === 'DP-1001');
   await page.locator('#fSearch').fill('DP-1001');
   await scoped;
@@ -111,7 +109,7 @@ test('UI behavior · drill-down preserves machine scope', async ({ page }) => {
   await page.locator('.deck .kpi').nth(2).click();
   const params = new URL((await request).url()).searchParams;
   expect(params.get('q')).toBe('DP-1001');
-  expect(params.get('status')).toBe('attention');
+  expect(params.get('status')).toBeNull();
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
