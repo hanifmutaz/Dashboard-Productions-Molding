@@ -73,7 +73,7 @@ export function StopTimePage() {
           {q.isPending ? <SkelDeck n={5} /> : !t ? <EmptyDeck labels={['Total stop time', 'Stop events', 'Active categories', 'Active details', 'Info-only stops']} msg={msg} /> : (
             <>
               <Kpi l="Total stop time" v={fmt(t.minutes)} u="min" desc={`${f1(t.minutes / 60)} hours${info ? ' · incl. info-only' : ''}`} d={<>{delta(t.minutes, p?.minutes, 'down')} {vs}</>} />
-              <Kpi l="Stop events" v={fmt(t.events)} desc="All recorded occurrences" d={<>{delta(t.events, p?.events, 'down')} {vs}</>} />
+              <Kpi l="Stop events" v={fmt(t.events)} desc="Consecutive hours of one stop = 1 event" d={<>{delta(t.events, p?.events, 'down')} {vs}</>} />
               <Kpi l="Active categories" v={t.activeCategories} u={`/ ${v.categories.length}`} desc="With stop time in range" d={<>{delta(t.activeCategories, p?.activeCategories, 'down')} {vs}</>} />
               <Kpi l="Active details" v={t.activeDetails} desc="Unique category + detail" d={<>{delta(t.activeDetails, p?.activeDetails, 'down')} {vs}</>} />
               <Kpi l="Info-only stops" v={fmt(t.infoMinutes)} u="min" chip={info ? 'Included' : 'Excluded'} desc="End shift, Informasi · not counted as loss" />

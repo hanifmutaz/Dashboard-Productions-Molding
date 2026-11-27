@@ -162,11 +162,31 @@ export function buildUtilization(records: SourceRecord[], prev: SourceRecord[] |
 
 // ---------------- Stop time ----------------
 export interface StopFilter { group?: LossGroup; category?: string; includeInfo: boolean }
+/** An event is a continuous run of hours (owner 2026-11-27): the same stop (machine + product + category + detail) in back-to-back hour blocks
+ * is ONE event, even across a shift change; one clean hour in between starts a new event. Slots of the same stop inside one hour also count once.
+ * Minutes are summed, the event starts at its first hour. */
+export function mergeContinuous(evs: Ev[], firstShiftStart: number = SHIFT_START_HOURS[0]): Ev[] {
+  const dayMin = (m: number) => (m - firstShiftStart * 60 + 1440) % 1440;
+  const abs = (e: Ev) => Math.round(Date.parse(e.date) / 864e5) * 1440 + dayMin(e.startMinuteOfDay);
+  const out: Ev[] = [];
+  for (const list of groupBy(evs, (e) => `${e.machineNo}|${e.productName ?? ''}|${e.cat.id}|${e.detail}`).values()) {
+    const sorted = list.map((e) => ({ e, t: abs(e) })).sort((x, y) => x.t - y.t);
+    let cur: Ev | null = null, last = 0;
+    for (const { e, t } of sorted) {
+      if (cur && t <= last + 60) { cur.minutes += e.minutes; last = Math.max(last, t); continue; }
+      if (cur) out.push(cur);
+      cur = { ...e };
+      last = t;
+    }
+    if (cur) out.push(cur);
+  }
+  return out;
+}
 function stopEvents(rs: SourceRecord[], resolve: Resolve, f: StopFilter): Ev[] {
-  return rs.flatMap((r) => {
+  return mergeContinuous(rs.flatMap((r) => {
     const e = eventsOf(r, resolve);
     return [...e.loss, ...(f.includeInfo ? e.info : [])];
-  }).filter((e) => (!f.group || e.cat.group === f.group) && (!f.category || e.cat.id === f.category));
+  })).filter((e) => (!f.group || e.cat.group === f.group) && (!f.category || e.cat.id === f.category));
 }
 function detailsOf(evs: Ev[]) {
   const m = new Map<string, { categoryId: string; detail: string; minutes: number; events: number }>();

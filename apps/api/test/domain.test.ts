@@ -3,7 +3,7 @@ import { aggregateRate, bekidoritsu, ipr, kikai, quality, salesValue, scrapKg, s
 import { applyFreshness, currentProductionDate } from '../src/modules/metrics/freshness.js';
 import { normalizeRow, parseHourLabel, parseRate, selectLatest, toIsoWithOffset, type SourceRecord } from '../src/modules/conmas/source.js';
 import { HEADER_COLUMNS, HOUR_BLOCKS } from '../src/modules/conmas/fieldMap.generated.js';
-import { buildMachineDetail, buildMachineList, buildSales, buildScrap, buildUtilization, buildProduction, eventsOf, hourlyOutput } from '../src/modules/metrics/views.js';
+import { buildMachineDetail, buildMachineList, buildSales, buildScrap, buildUtilization, buildProduction, buildStopTime, eventsOf, hourlyOutput, mergeContinuous } from '../src/modules/metrics/views.js';
 import { categoryResolver } from '../src/modules/metrics/categories.js';
 import { DEFAULT_SETTINGS, SettingsBodySchema, type StopCategory } from '@mpd/contracts';
 
@@ -338,5 +338,43 @@ describe('buildScrap (NG gram ConMas x harga material per gram)', () => {
   it('filter shift dipakai', () => {
     const v = buildScrap([rec({ dpNo: 'DP1', ngGram: 100, shift: '1' }), rec({ dpNo: 'DP1', ngGram: 900, shift: '2', machineNo: '2' })], parts, mats, { ...rg, shift: '2' });
     expect(v.scrapGram).toBe(900);
+  });
+});
+
+describe('stop event = continuous run of hours (owner 2026-11-27)', () => {
+  const { resolve } = categoryResolver([]);
+  const stop = (block: number, detail = 'Alarm Camera', minutes = 60, startHour: number | null = 6 + block) => ({ block, startHour, qty: null, minutes, category: 'Chokotei', detail, reject: null, rejectQty: null });
+  const sf = { includeInfo: false };
+  const events = (rs: SourceRecord[]) => buildStopTime(rs, null, range, [], resolve, sf);
+  it('9-10 and 10-11 are one event, 11-12 clean, 13-14 is a second event', () => {
+    const v = events([rec({ slots: [stop(3), stop(4), stop(7)] })]);
+    expect(v.totals.events).toBe(2);
+    expect(v.totals.minutes).toBe(180);
+    expect(v.details[0]).toMatchObject({ detail: 'Alarm Camera', events: 2, minutes: 180 });
+    expect(v.byMachine[0]!.events).toBe(2);
+  });
+  it('a different detail in the next hour is a separate event', () => {
+    expect(events([rec({ slots: [stop(3, 'Alarm Camera'), stop(4, 'Alarm Robot')] })]).totals.events).toBe(2);
+  });
+  it('same stop in several slots of one hour counts once, minutes add up', () => {
+    const v = events([rec({ slots: [stop(3, 'Alarm Camera', 20), stop(3, 'Alarm Camera', 15)] })]);
+    expect(v.totals.events).toBe(1);
+    expect(v.totals.minutes).toBe(35);
+  });
+  it('continues across the shift boundary and across midnight into shift 3', () => {
+    const s1 = rec({ shift: '1', slots: [stop(7, 'Alarm Camera', 60, 13)] });
+    const s2 = rec({ shift: '2', slots: [stop(0, 'Alarm Camera', 60, 14)] });
+    expect(events([s1, s2]).totals.events).toBe(1);
+    const s3 = rec({ shift: '3', slots: [stop(1, 'Alarm Camera', 60, 23), stop(2, 'Alarm Camera', 60, 0), stop(4, 'Alarm Camera', 60, 2)] });
+    expect(events([s3]).totals.events).toBe(2);
+  });
+  it('different machines never merge', () => {
+    expect(events([rec({ machineNo: '1', slots: [stop(3)] }), rec({ machineNo: '2', slots: [stop(4)] })]).totals.events).toBe(2);
+  });
+  it('mergeContinuous leaves total minutes untouched', () => {
+    const evs = eventsOf(rec({ slots: [stop(0), stop(1), stop(5)] }), resolve).loss;
+    const merged = mergeContinuous(evs);
+    expect(merged.reduce((a, e) => a + e.minutes, 0)).toBe(evs.reduce((a, e) => a + e.minutes, 0));
+    expect(merged).toHaveLength(2);
   });
 });
